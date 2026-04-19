@@ -209,9 +209,9 @@ class TestIngestMethylation(unittest.TestCase):
             (meth_raw_dir / "good.methylation_array.sesame.level3betas.txt").write_text(
                 METHYLATION_TSV_CONTENT
             )
-            # Bad file — wrong number of columns (3 instead of 2)
+            # Bad file — non-numeric beta values, will raise during Float64 cast
             (meth_raw_dir / "bad.methylation_array.sesame.level3betas.txt").write_text(
-                "cg001\t0.5\textra_col\ncg002\t0.3\textra_col\n"
+                "cg001\tNOT_A_NUMBER\ncg002\tALSO_BAD\n"
             )
 
             with patch("src.ingest_methylation.fetch_manifest", return_value=manifest):
