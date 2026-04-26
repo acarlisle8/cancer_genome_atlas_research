@@ -1,11 +1,11 @@
-"""GDC API manifest fetcher and S3 downloader for TCGA data."""
-import pathlib
+"""GDC API manifest fetcher and DuckDB S3 connection factory for TCGA data."""
+import os
 
+import duckdb
 import requests
-import s3fs
 
 GDC_FILES_URL = "https://api.gdc.cancer.gov/files"
-TCGA_S3_BUCKET = "tcga-2-open"
+TCGA_S3_BUCKET = "s3://g23861422-datsbd-s2026/tcga/"
 
 
 def fetch_manifest(
@@ -85,39 +85,26 @@ def fetch_manifest(
     return result
 
 
-def download_file(
-    file_id: str,
-    file_name: str,
-    dest_dir: pathlib.Path,
-) -> pathlib.Path:
+def get_duckdb_conn(db_path: str = ":memory:") -> duckdb.DuckDBPyConnection:
     """
-    Download one file from s3://tcga-2-open/{file_id}/{file_name} to dest_dir/file_name.
+    Create a DuckDB connection configured for authenticated S3 access.
 
-    If dest_dir/file_name already exists, skip download and return path (D-07 resume).
-    Uses s3fs.S3FileSystem(anon=True) for anonymous S3 access.
+    Reads AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY, AWS_SESSION_TOKEN,
+    and AWS_DEFAULT_REGION from environment variables.
 
     Args:
-        file_id: GDC file UUID
-        file_name: Name of the file
-        dest_dir: Local directory to download into (will be created if missing)
+        db_path: DuckDB database path (default ":memory:")
 
     Returns:
-        pathlib.Path to the downloaded (or already-existing) local file
+        Configured DuckDB connection ready to query S3 via read_csv / read_parquet
     """
-    dest_path = dest_dir / file_name
+    con = duckdb.connect(db_path)
+    con.execute("INSTALL httpfs; LOAD httpfs;")
+    con.execute(f"""
+        SET s3_access_key_id     = '{os.environ["AWS_ACCESS_KEY_ID"]}';
+        SET s3_secret_access_key = '{os.environ["AWS_SECRET_ACCESS_KEY"]}';
+        SET s3_session_token     = '{os.environ.get("AWS_SESSION_TOKEN", "")}';
+        SET s3_region            = '{os.environ.get("AWS_DEFAULT_REGION", "us-east-1")}';
+    """)
+    return con
 
-    if dest_path.exists():
-        return dest_path
-
-    dest_dir.mkdir(parents=True, exist_ok=True)
-
-    s3_path = f"s3://{TCGA_S3_BUCKET}/{file_id}/{file_name}"
-    fs = s3fs.S3FileSystem(anon=True)
-
-    with fs.open(s3_path, "rb") as remote_file:
-        content = remote_file.read()
-
-    with open(dest_path, "wb") as local_file:
-        local_file.write(content)
-
-    return dest_path
