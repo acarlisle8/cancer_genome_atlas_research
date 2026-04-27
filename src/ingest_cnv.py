@@ -43,7 +43,7 @@ def ingest_cnv(
             patient_id  VARCHAR,
             chromosome  VARCHAR,
             start       BIGINT,
-            end         BIGINT,
+            "end"       BIGINT,
             copy_number DOUBLE
         )
     """)
