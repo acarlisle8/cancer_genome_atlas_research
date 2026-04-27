@@ -1,10 +1,11 @@
-"""Tests for src/ingest_cnv.py — CNV segment aggregator."""
-import io
+"""Tests for src/ingest_cnv.py — DuckDB-direct CNV aggregator."""
+import csv
 import pathlib
 import tempfile
 import unittest
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
+import duckdb
 import polars as pl
 
 
@@ -16,223 +17,136 @@ CNV_TSV_CONTENT = (
 )
 
 
-class TestParseCnvSeg(unittest.TestCase):
-    """Tests for parse_cnv_seg()."""
-
-    def test_output_columns_are_exactly_five(self):
-        """parse_cnv_seg output has exactly: patient_id, chromosome, start, end, copy_number."""
-        from src.ingest_cnv import parse_cnv_seg
-
-        with tempfile.NamedTemporaryFile(
-            mode="w", suffix=".seg.txt", delete=False
-        ) as f:
-            f.write(CNV_TSV_CONTENT)
-            tmp_path = pathlib.Path(f.name)
-
-        df = parse_cnv_seg(tmp_path, "TCGA-XX-0001")
-        self.assertEqual(
-            df.columns, ["patient_id", "chromosome", "start", "end", "copy_number"]
-        )
-        tmp_path.unlink()
-
-    def test_row_count_matches_data_rows(self):
-        """parse_cnv_seg returns 3 rows for a file with 3 data rows."""
-        from src.ingest_cnv import parse_cnv_seg
-
-        with tempfile.NamedTemporaryFile(
-            mode="w", suffix=".seg.txt", delete=False
-        ) as f:
-            f.write(CNV_TSV_CONTENT)
-            tmp_path = pathlib.Path(f.name)
-
-        df = parse_cnv_seg(tmp_path, "TCGA-XX-0001")
-        self.assertEqual(len(df), 3)
-        tmp_path.unlink()
-
-    def test_no_extra_columns(self):
-        """parse_cnv_seg drops GDC_Aliquot and Num_Probes columns."""
-        from src.ingest_cnv import parse_cnv_seg
-
-        with tempfile.NamedTemporaryFile(
-            mode="w", suffix=".seg.txt", delete=False
-        ) as f:
-            f.write(CNV_TSV_CONTENT)
-            tmp_path = pathlib.Path(f.name)
-
-        df = parse_cnv_seg(tmp_path, "TCGA-XX-0001")
-        self.assertNotIn("GDC_Aliquot", df.columns)
-        self.assertNotIn("Num_Probes", df.columns)
-        tmp_path.unlink()
-
-    def test_patient_id_column_value(self):
-        """parse_cnv_seg sets patient_id to the provided value."""
-        from src.ingest_cnv import parse_cnv_seg
-
-        with tempfile.NamedTemporaryFile(
-            mode="w", suffix=".seg.txt", delete=False
-        ) as f:
-            f.write(CNV_TSV_CONTENT)
-            tmp_path = pathlib.Path(f.name)
-
-        df = parse_cnv_seg(tmp_path, "TCGA-AB-9999")
-        self.assertTrue((df["patient_id"] == "TCGA-AB-9999").all())
-        tmp_path.unlink()
-
-    def test_dtypes(self):
-        """parse_cnv_seg produces correct dtypes: patient_id/chromosome=Utf8, start/end=Int64, copy_number=Float64."""
-        from src.ingest_cnv import parse_cnv_seg
-
-        with tempfile.NamedTemporaryFile(
-            mode="w", suffix=".seg.txt", delete=False
-        ) as f:
-            f.write(CNV_TSV_CONTENT)
-            tmp_path = pathlib.Path(f.name)
-
-        df = parse_cnv_seg(tmp_path, "TCGA-XX-0001")
-        self.assertEqual(df["patient_id"].dtype, pl.Utf8)
-        self.assertEqual(df["chromosome"].dtype, pl.Utf8)
-        self.assertEqual(df["start"].dtype, pl.Int64)
-        self.assertEqual(df["end"].dtype, pl.Int64)
-        self.assertEqual(df["copy_number"].dtype, pl.Float64)
-        tmp_path.unlink()
-
-    def test_segment_mean_renamed_to_copy_number(self):
-        """parse_cnv_seg renames Segment_Mean -> copy_number with correct values."""
-        from src.ingest_cnv import parse_cnv_seg
-
-        with tempfile.NamedTemporaryFile(
-            mode="w", suffix=".seg.txt", delete=False
-        ) as f:
-            f.write(CNV_TSV_CONTENT)
-            tmp_path = pathlib.Path(f.name)
-
-        df = parse_cnv_seg(tmp_path, "TCGA-XX-0001")
-        self.assertAlmostEqual(df["copy_number"][0], 0.123)
-        self.assertAlmostEqual(df["copy_number"][1], -0.456)
-        tmp_path.unlink()
+def _write_fake_s3_file(fake_bucket: pathlib.Path, file_id: str, file_name: str, content: str) -> None:
+    """Create <fake_bucket>/cnv/<file_id>/<file_name> with given content."""
+    file_dir = fake_bucket / "cnv" / file_id
+    file_dir.mkdir(parents=True, exist_ok=True)
+    (file_dir / file_name).write_text(content)
 
 
 class TestIngestCnv(unittest.TestCase):
-    """Tests for ingest_cnv()."""
+    """End-to-end tests for ingest_cnv() against a local fake S3 bucket."""
 
-    def _make_manifest(self):
+    def _manifest(self):
         return [
-            {
-                "file_id": "file-id-001",
-                "file_name": "patient1.seg.v2.txt",
-                "patient_id": "TCGA-AA-0001",
-            },
-            {
-                "file_id": "file-id-002",
-                "file_name": "patient2.seg.v2.txt",
-                "patient_id": "TCGA-AA-0002",
-            },
+            {"file_id": "file-id-001", "file_name": "p1.seg.v2.txt", "patient_id": "TCGA-AA-0001"},
+            {"file_id": "file-id-002", "file_name": "p2.seg.v2.txt", "patient_id": "TCGA-AA-0002"},
         ]
 
-    def test_ingest_cnv_writes_parquet(self):
-        """ingest_cnv writes cnv.parquet to output_dir."""
+    def test_writes_parquet(self):
         from src.ingest_cnv import ingest_cnv
 
-        manifest = self._make_manifest()
-
-        with tempfile.TemporaryDirectory() as tmpdir:
-            output_dir = pathlib.Path(tmpdir) / "output"
-            raw_dir = pathlib.Path(tmpdir) / "raw"
-            output_dir.mkdir()
-            raw_dir.mkdir()
-
-            # Create fake downloaded files
-            cnv_raw_dir = raw_dir / "cnv"
-            cnv_raw_dir.mkdir()
+        manifest = self._manifest()
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = pathlib.Path(tmp)
+            output_dir = tmp_path / "output"
+            fake_bucket = tmp_path / "fake_s3"
             for entry in manifest:
-                fpath = cnv_raw_dir / entry["file_name"]
-                fpath.write_text(CNV_TSV_CONTENT)
+                _write_fake_s3_file(fake_bucket, entry["file_id"], entry["file_name"], CNV_TSV_CONTENT)
 
-            with patch("src.ingest_cnv.fetch_manifest", return_value=manifest):
-                with patch(
-                    "src.ingest_cnv.download_file",
-                    side_effect=lambda fid, fname, dest: dest / fname,
-                ):
-                    result = ingest_cnv(output_dir, raw_dir, "TCGA-BRCA")
+            with patch("src.ingest_cnv.TCGA_S3_BUCKET", f"{fake_bucket}/"), \
+                 patch("src.ingest_cnv.fetch_manifest", return_value=manifest), \
+                 patch("src.ingest_cnv.get_duckdb_conn", return_value=duckdb.connect(":memory:")):
+                result = ingest_cnv(output_dir, "TCGA-BRCA")
 
             self.assertTrue((output_dir / "cnv.parquet").exists())
             self.assertEqual(result, output_dir / "cnv.parquet")
 
-    def test_ingest_cnv_parquet_has_correct_schema(self):
-        """ingest_cnv output parquet has correct column names."""
+    def test_parquet_schema_and_row_count(self):
         from src.ingest_cnv import ingest_cnv
 
-        manifest = self._make_manifest()
-
-        with tempfile.TemporaryDirectory() as tmpdir:
-            output_dir = pathlib.Path(tmpdir) / "output"
-            raw_dir = pathlib.Path(tmpdir) / "raw"
-            output_dir.mkdir()
-            raw_dir.mkdir()
-
-            cnv_raw_dir = raw_dir / "cnv"
-            cnv_raw_dir.mkdir()
+        manifest = self._manifest()
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = pathlib.Path(tmp)
+            output_dir = tmp_path / "output"
+            fake_bucket = tmp_path / "fake_s3"
             for entry in manifest:
-                fpath = cnv_raw_dir / entry["file_name"]
-                fpath.write_text(CNV_TSV_CONTENT)
+                _write_fake_s3_file(fake_bucket, entry["file_id"], entry["file_name"], CNV_TSV_CONTENT)
 
-            with patch("src.ingest_cnv.fetch_manifest", return_value=manifest):
-                with patch(
-                    "src.ingest_cnv.download_file",
-                    side_effect=lambda fid, fname, dest: dest / fname,
-                ):
-                    ingest_cnv(output_dir, raw_dir, "TCGA-BRCA")
+            with patch("src.ingest_cnv.TCGA_S3_BUCKET", f"{fake_bucket}/"), \
+                 patch("src.ingest_cnv.fetch_manifest", return_value=manifest), \
+                 patch("src.ingest_cnv.get_duckdb_conn", return_value=duckdb.connect(":memory:")):
+                ingest_cnv(output_dir, "TCGA-BRCA")
 
             df = pl.read_parquet(output_dir / "cnv.parquet")
-            self.assertEqual(
-                df.columns,
-                ["patient_id", "chromosome", "start", "end", "copy_number"],
-            )
+            self.assertEqual(df.columns, ["patient_id", "chromosome", "start", "end", "copy_number"])
+            self.assertEqual(df["patient_id"].dtype, pl.Utf8)
+            self.assertEqual(df["chromosome"].dtype, pl.Utf8)
+            self.assertEqual(df["start"].dtype, pl.Int64)
+            self.assertEqual(df["end"].dtype, pl.Int64)
+            self.assertEqual(df["copy_number"].dtype, pl.Float64)
             # 2 patients * 3 rows each
             self.assertEqual(len(df), 6)
 
-    def test_ingest_cnv_skip_and_log_on_parse_error(self):
-        """ingest_cnv writes errors_cnv.csv and continues when parse_cnv_seg raises."""
+    def test_patient_ids_attached_correctly(self):
+        from src.ingest_cnv import ingest_cnv
+
+        manifest = self._manifest()
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = pathlib.Path(tmp)
+            output_dir = tmp_path / "output"
+            fake_bucket = tmp_path / "fake_s3"
+            for entry in manifest:
+                _write_fake_s3_file(fake_bucket, entry["file_id"], entry["file_name"], CNV_TSV_CONTENT)
+
+            with patch("src.ingest_cnv.TCGA_S3_BUCKET", f"{fake_bucket}/"), \
+                 patch("src.ingest_cnv.fetch_manifest", return_value=manifest), \
+                 patch("src.ingest_cnv.get_duckdb_conn", return_value=duckdb.connect(":memory:")):
+                ingest_cnv(output_dir, "TCGA-BRCA")
+
+            df = pl.read_parquet(output_dir / "cnv.parquet")
+            self.assertEqual(set(df["patient_id"].to_list()), {"TCGA-AA-0001", "TCGA-AA-0002"})
+
+    def test_skip_and_log_on_parse_error(self):
+        """When one file is malformed, write errors_cnv.csv and keep going."""
         from src.ingest_cnv import ingest_cnv
 
         manifest = [
-            {
-                "file_id": "file-id-001",
-                "file_name": "good.seg.txt",
-                "patient_id": "TCGA-AA-0001",
-            },
-            {
-                "file_id": "file-id-bad",
-                "file_name": "bad.seg.txt",
-                "patient_id": "TCGA-AA-XXXX",
-            },
+            {"file_id": "file-good", "file_name": "good.seg.txt", "patient_id": "TCGA-AA-0001"},
+            {"file_id": "file-bad",  "file_name": "bad.seg.txt",  "patient_id": "TCGA-AA-XXXX"},
         ]
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = pathlib.Path(tmp)
+            output_dir = tmp_path / "output"
+            fake_bucket = tmp_path / "fake_s3"
+            _write_fake_s3_file(fake_bucket, "file-good", "good.seg.txt", CNV_TSV_CONTENT)
+            _write_fake_s3_file(fake_bucket, "file-bad", "bad.seg.txt", "not\ta\tvalid\tfile\n1\t2\t3\t4\n")
 
-        with tempfile.TemporaryDirectory() as tmpdir:
-            output_dir = pathlib.Path(tmpdir) / "output"
-            raw_dir = pathlib.Path(tmpdir) / "raw"
-            output_dir.mkdir()
-            raw_dir.mkdir()
+            with patch("src.ingest_cnv.TCGA_S3_BUCKET", f"{fake_bucket}/"), \
+                 patch("src.ingest_cnv.fetch_manifest", return_value=manifest), \
+                 patch("src.ingest_cnv.get_duckdb_conn", return_value=duckdb.connect(":memory:")):
+                ingest_cnv(output_dir, "TCGA-BRCA")
 
-            cnv_raw_dir = raw_dir / "cnv"
-            cnv_raw_dir.mkdir()
+            errors_csv = output_dir / "errors_cnv.csv"
+            self.assertTrue(errors_csv.exists())
+            with open(errors_csv, newline="") as f:
+                rows = list(csv.DictReader(f))
+            self.assertEqual(len(rows), 1)
+            self.assertEqual(rows[0]["patient_id"], "TCGA-AA-XXXX")
+            self.assertEqual(rows[0]["file_id"], "file-bad")
+            self.assertIn("error", rows[0])
 
-            # Good file
-            (cnv_raw_dir / "good.seg.txt").write_text(CNV_TSV_CONTENT)
-            # Bad file (malformed — no valid columns)
-            (cnv_raw_dir / "bad.seg.txt").write_text("not\ta\tvalid\tfile\n1\t2\t3\t4\n")
+            df = pl.read_parquet(output_dir / "cnv.parquet")
+            self.assertEqual(len(df), 3)
+            self.assertEqual(set(df["patient_id"].to_list()), {"TCGA-AA-0001"})
 
-            with patch("src.ingest_cnv.fetch_manifest", return_value=manifest):
-                with patch(
-                    "src.ingest_cnv.download_file",
-                    side_effect=lambda fid, fname, dest: dest / fname,
-                ):
-                    ingest_cnv(output_dir, raw_dir, "TCGA-BRCA")
+    def test_no_error_csv_when_all_succeed(self):
+        from src.ingest_cnv import ingest_cnv
 
-            # errors_cnv.csv must be written
-            self.assertTrue((output_dir / "errors_cnv.csv").exists())
-            # cnv.parquet must still exist (pipeline did not abort)
-            self.assertTrue((output_dir / "cnv.parquet").exists())
+        manifest = self._manifest()
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = pathlib.Path(tmp)
+            output_dir = tmp_path / "output"
+            fake_bucket = tmp_path / "fake_s3"
+            for entry in manifest:
+                _write_fake_s3_file(fake_bucket, entry["file_id"], entry["file_name"], CNV_TSV_CONTENT)
+
+            with patch("src.ingest_cnv.TCGA_S3_BUCKET", f"{fake_bucket}/"), \
+                 patch("src.ingest_cnv.fetch_manifest", return_value=manifest), \
+                 patch("src.ingest_cnv.get_duckdb_conn", return_value=duckdb.connect(":memory:")):
+                ingest_cnv(output_dir, "TCGA-BRCA")
+
+            self.assertFalse((output_dir / "errors_cnv.csv").exists())
 
 
 if __name__ == "__main__":
