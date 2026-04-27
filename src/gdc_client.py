@@ -89,8 +89,11 @@ def get_duckdb_conn(db_path: str = ":memory:") -> duckdb.DuckDBPyConnection:
     """
     Create a DuckDB connection configured for authenticated S3 access.
 
-    Reads AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY, AWS_SESSION_TOKEN,
-    and AWS_DEFAULT_REGION from environment variables.
+    Resolves credentials via the AWS SDK default chain, in order:
+      1. Environment variables (AWS_ACCESS_KEY_ID etc.)
+      2. ~/.aws/credentials profile
+      3. SSO
+      4. EC2 instance profile (IMDS)
 
     Args:
         db_path: DuckDB database path (default ":memory:")
@@ -100,11 +103,14 @@ def get_duckdb_conn(db_path: str = ":memory:") -> duckdb.DuckDBPyConnection:
     """
     con = duckdb.connect(db_path)
     con.execute("INSTALL httpfs; LOAD httpfs;")
+    region = os.environ.get("AWS_DEFAULT_REGION", "us-east-1")
     con.execute(f"""
-        SET s3_access_key_id     = '{os.environ["AWS_ACCESS_KEY_ID"]}';
-        SET s3_secret_access_key = '{os.environ["AWS_SECRET_ACCESS_KEY"]}';
-        SET s3_session_token     = '{os.environ.get("AWS_SESSION_TOKEN", "")}';
-        SET s3_region            = '{os.environ.get("AWS_DEFAULT_REGION", "us-east-1")}';
+        CREATE OR REPLACE SECRET tcga_s3 (
+            TYPE S3,
+            PROVIDER credential_chain,
+            CHAIN 'env;config;sso;instance',
+            REGION '{region}'
+        )
     """)
     return con
 
