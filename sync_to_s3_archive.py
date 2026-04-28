@@ -70,17 +70,8 @@ def key_exists(s3_client, bucket: str, key: str) -> bool:
         return False
 
 
-def _process_entry(auth_s3, anon_s3, dest_bucket, dest_prefix, modality_name, entry):
-    """Worker: HEAD-check then copy one file with AccessDenied fallback.
-
-    Tries server-side CopyObject first (fast, data stays in AWS). If AWS
-    returns AccessDenied — which happens for some objects in tcga-2-open
-    that have anonymous-only ACLs — falls back to anonymous GET +
-    authenticated PUT through this machine. Slower per file but works for
-    every public-readable object.
-
-    Returns 'copied', 'skipped', or 'failed'.
-    """
+def _process_entry(auth_s3, dest_bucket, dest_prefix, modality_name, entry):
+    """Worker: HEAD-check then COPY one file. Returns 'copied', 'skipped', or 'failed'."""
     file_id = entry["file_id"]
     file_name = entry["file_name"]
     src_key = f"{file_id}/{file_name}"
@@ -97,27 +88,12 @@ def _process_entry(auth_s3, anon_s3, dest_bucket, dest_prefix, modality_name, en
         )
         return "copied"
     except Exception as exc:
-        is_access_denied = "AccessDenied" in str(exc)
-        if not is_access_denied:
-            print(f"  FAILED {file_name}: {exc}", file=sys.stderr)
-            return "failed"
-        # Fallback: anonymous GET from public source, authenticated PUT to dest.
-        try:
-            obj = anon_s3.get_object(Bucket=SOURCE_BUCKET, Key=src_key)
-            auth_s3.put_object(
-                Bucket=dest_bucket,
-                Key=dest_key,
-                Body=obj["Body"].read(),
-            )
-            return "copied"
-        except Exception as inner:
-            print(f"  FAILED (after anon fallback) {file_name}: {inner}", file=sys.stderr)
-            return "failed"
+        print(f"  FAILED {file_name}: {exc}", file=sys.stderr)
+        return "failed"
 
 
 def sync_modality(
     auth_s3,
-    anon_s3,
     dest_bucket: str,
     dest_prefix: str,
     project_id: str,
@@ -133,7 +109,7 @@ def sync_modality(
     copied = skipped = failed = 0
     with ThreadPoolExecutor(max_workers=MAX_WORKERS) as pool:
         futures = [
-            pool.submit(_process_entry, auth_s3, anon_s3, dest_bucket, dest_prefix, modality_name, e)
+            pool.submit(_process_entry, auth_s3, dest_bucket, dest_prefix, modality_name, e)
             for e in entries
         ]
         for fut in as_completed(futures):
@@ -164,15 +140,8 @@ def main():
     else:
         projects = ["TCGA-BRCA"]
 
-    # Authenticated client — writes to your bucket; primary CopyObject source.
+    # Authenticated client — reads public source bucket and writes to your bucket
     auth_s3 = boto3.client("s3", region_name="us-east-1")
-    # Unsigned client — fallback for objects in tcga-2-open whose per-object
-    # ACL only grants anonymous read (CopyObject from auth fails AccessDenied).
-    anon_s3 = boto3.client(
-        "s3",
-        region_name="us-east-1",
-        config=Config(signature_version=UNSIGNED),
-    )
 
     print(f"Syncing {len(projects)} project(s) → s3://{DEST_BUCKET}/{args.prefix}")
 
@@ -182,7 +151,7 @@ def main():
         proj_copied = proj_skipped = 0
         for data_category, data_type, modality_name in MODALITIES:
             copied, skipped = sync_modality(
-                auth_s3, anon_s3,
+                auth_s3,
                 DEST_BUCKET, args.prefix,
                 proj,
                 data_category, data_type, modality_name,
