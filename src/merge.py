@@ -81,8 +81,16 @@ def _pivot_rnaseq(parquet_path: pathlib.Path, top_genes: list[str]) -> pl.DataFr
     Returns:
         Wide DataFrame with columns: patient_id, <gene_id_1>, ..., <gene_id_n>.
     """
-    df = pl.read_parquet(parquet_path)
-    filtered = df.filter(pl.col("gene_id").is_in(top_genes))
+    # Lab-05 memory pattern: lazy scan + filter pushdown + project only the
+    # columns the pivot actually needs. RNA-seq parquets are 0.7–1.5 GB
+    # compressed, so eager pl.read_parquet OOMs an 8 GB instance; this
+    # collects only ~547K rows (1095 patients × 500 top genes) instead.
+    filtered = (
+        pl.scan_parquet(parquet_path)
+        .filter(pl.col("gene_id").is_in(top_genes))
+        .select(["patient_id", "gene_id", "fpkm_uq_unstranded"])
+        .collect()
+    )
     return filtered.pivot(
         on="gene_id",
         index="patient_id",
