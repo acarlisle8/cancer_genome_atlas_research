@@ -58,6 +58,13 @@ def fetch_manifest(
                         "value": data_type,
                     },
                 },
+                {
+                    "op": "=",
+                    "content": {
+                        "field": "access",
+                        "value": "open",
+                    },
+                },
             ],
         },
         "fields": "file_id,file_name,cases.submitter_id",
