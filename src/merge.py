@@ -1,6 +1,7 @@
 """Merge: pivot Phase 1 Parquets and join into a single wide feature matrix."""
 import pathlib
 
+import duckdb
 import polars as pl
 
 from src.utils import get_logger
@@ -45,22 +46,25 @@ def _top_n_by_variance(
     Returns:
         List of n feature ID strings sorted by descending variance.
     """
-    # Lab-05 memory pattern: project only the columns we need before the
-    # group_by, and use the streaming engine so the aggregation processes
-    # parquet row groups in chunks instead of materializing everything.
-    lf = (
-        pl.scan_parquet([str(p) for p in parquet_paths])
-        .select([id_col, value_col])
-    )
-    top = (
-        lf
-        .group_by(id_col)
-        .agg(pl.col(value_col).var().alias("variance"))
-        .sort("variance", descending=True, nulls_last=True)
-        .head(n)
-        .collect(engine="streaming")
-    )
-    return top[id_col].to_list()
+    # DuckDB streaming COUNT/VAR aggregation; same pattern that works in
+    # verify_ingest.py. Polars's streaming engine fell back to eager on the
+    # var() + sort + head chain and OOM'd an 8 GB instance — DuckDB doesn't.
+    paths_sql = ", ".join(f"'{p}'" for p in parquet_paths)
+    con = duckdb.connect(":memory:")
+    try:
+        con.execute("PRAGMA memory_limit='4GB'")
+        con.execute("PRAGMA threads=2")
+        rows = con.execute(f"""
+            SELECT {id_col}
+            FROM read_parquet([{paths_sql}])
+            WHERE {value_col} IS NOT NULL
+            GROUP BY {id_col}
+            ORDER BY VAR_POP({value_col}) DESC NULLS LAST
+            LIMIT {n}
+        """).fetchall()
+    finally:
+        con.close()
+    return [r[0] for r in rows]
 
 
 def _pivot_rnaseq(parquet_path: pathlib.Path, top_genes: list[str]) -> pl.DataFrame:
