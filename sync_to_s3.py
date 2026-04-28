@@ -15,12 +15,12 @@ import sys
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 import boto3
-from botocore import UNSIGNED
-from botocore.config import Config
+import requests
 
 from src.gdc_client import fetch_manifest
 
 SOURCE_BUCKET = "tcga-2-open"
+GDC_DATA_URL = "https://api.gdc.cancer.gov/data"
 DEST_BUCKET = "g23861422-datsbd-s2026"
 DEFAULT_PREFIX = "tcga/"
 
@@ -70,14 +70,16 @@ def key_exists(s3_client, bucket: str, key: str) -> bool:
         return False
 
 
-def _process_entry(auth_s3, anon_s3, dest_bucket, dest_prefix, modality_name, entry):
+def _process_entry(auth_s3, dest_bucket, dest_prefix, modality_name, entry):
     """Worker: HEAD-check then copy one file with AccessDenied fallback.
 
     Tries server-side CopyObject first (fast, data stays in AWS). If AWS
     returns AccessDenied — which happens for some objects in tcga-2-open
-    that have anonymous-only ACLs — falls back to anonymous GET +
-    authenticated PUT through this machine. Slower per file but works for
-    every public-readable object.
+    where both auth and anonymous S3 GetObject are blocked but the GDC
+    HTTPS data API still serves the file — falls back to downloading via
+    https://api.gdc.cancer.gov/data/{file_id} and PUTting to dest. Slower
+    per file (HTTPS through this machine) but recovers every open-access
+    file.
 
     Returns 'copied', 'skipped', or 'failed'.
     """
@@ -101,23 +103,23 @@ def _process_entry(auth_s3, anon_s3, dest_bucket, dest_prefix, modality_name, en
         if not is_access_denied:
             print(f"  FAILED {file_name}: {exc}", file=sys.stderr)
             return "failed"
-        # Fallback: anonymous GET from public source, authenticated PUT to dest.
+        # Fallback: GDC HTTPS data API → authenticated PUT to dest.
         try:
-            obj = anon_s3.get_object(Bucket=SOURCE_BUCKET, Key=src_key)
+            response = requests.get(f"{GDC_DATA_URL}/{file_id}", timeout=300)
+            response.raise_for_status()
             auth_s3.put_object(
                 Bucket=dest_bucket,
                 Key=dest_key,
-                Body=obj["Body"].read(),
+                Body=response.content,
             )
             return "copied"
         except Exception as inner:
-            print(f"  FAILED (after anon fallback) {file_name}: {inner}", file=sys.stderr)
+            print(f"  FAILED (after GDC fallback) {file_name}: {inner}", file=sys.stderr)
             return "failed"
 
 
 def sync_modality(
     auth_s3,
-    anon_s3,
     dest_bucket: str,
     dest_prefix: str,
     project_id: str,
@@ -133,7 +135,7 @@ def sync_modality(
     copied = skipped = failed = 0
     with ThreadPoolExecutor(max_workers=MAX_WORKERS) as pool:
         futures = [
-            pool.submit(_process_entry, auth_s3, anon_s3, dest_bucket, dest_prefix, modality_name, e)
+            pool.submit(_process_entry, auth_s3, dest_bucket, dest_prefix, modality_name, e)
             for e in entries
         ]
         for fut in as_completed(futures):
@@ -166,13 +168,6 @@ def main():
 
     # Authenticated client — writes to your bucket; primary CopyObject source.
     auth_s3 = boto3.client("s3", region_name="us-east-1")
-    # Unsigned client — fallback for objects in tcga-2-open whose per-object
-    # ACL only grants anonymous read (CopyObject from auth fails AccessDenied).
-    anon_s3 = boto3.client(
-        "s3",
-        region_name="us-east-1",
-        config=Config(signature_version=UNSIGNED),
-    )
 
     print(f"Syncing {len(projects)} project(s) → s3://{DEST_BUCKET}/{args.prefix}")
 
@@ -182,7 +177,7 @@ def main():
         proj_copied = proj_skipped = 0
         for data_category, data_type, modality_name in MODALITIES:
             copied, skipped = sync_modality(
-                auth_s3, anon_s3,
+                auth_s3,
                 DEST_BUCKET, args.prefix,
                 proj,
                 data_category, data_type, modality_name,
