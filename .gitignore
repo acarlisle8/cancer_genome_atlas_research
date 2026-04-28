@@ -2,10 +2,10 @@ __pycache__/
 *.pyc
 *.pyo
 .pytest_cache/
-.planning/
 CLAUDE.md
 .claude/
 .venv/
 .uv/
 
-data/
+data/*
+!data/merged_all_cohorts.parquet

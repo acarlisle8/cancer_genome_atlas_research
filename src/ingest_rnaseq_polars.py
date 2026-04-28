@@ -92,7 +92,7 @@ def ingest_rnaseq_polars(
         ])
     )
 
-    parquet_path = output_dir / "rna_seq_polars.parquet"
+    parquet_path = output_dir / "rna_seq.parquet"
     result.sink_parquet(parquet_path, compression="snappy")
 
     logger.info("Wrote to %s in %.1fs total", parquet_path, time.time() - t0)

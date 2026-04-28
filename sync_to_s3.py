@@ -15,12 +15,12 @@ import sys
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 import boto3
-from botocore import UNSIGNED
-from botocore.config import Config
+import requests
 
 from src.gdc_client import fetch_manifest
 
 SOURCE_BUCKET = "tcga-2-open"
+GDC_DATA_URL = "https://api.gdc.cancer.gov/data"
 DEST_BUCKET = "g23861422-datsbd-s2026"
 DEFAULT_PREFIX = "tcga/"
 
@@ -71,7 +71,18 @@ def key_exists(s3_client, bucket: str, key: str) -> bool:
 
 
 def _process_entry(auth_s3, dest_bucket, dest_prefix, modality_name, entry):
-    """Worker: HEAD-check then COPY one file. Returns 'copied', 'skipped', or 'failed'."""
+    """Worker: HEAD-check then copy one file with AccessDenied fallback.
+
+    Tries server-side CopyObject first (fast, data stays in AWS). If AWS
+    returns AccessDenied — which happens for some objects in tcga-2-open
+    where both auth and anonymous S3 GetObject are blocked but the GDC
+    HTTPS data API still serves the file — falls back to downloading via
+    https://api.gdc.cancer.gov/data/{file_id} and PUTting to dest. Slower
+    per file (HTTPS through this machine) but recovers every open-access
+    file.
+
+    Returns 'copied', 'skipped', or 'failed'.
+    """
     file_id = entry["file_id"]
     file_name = entry["file_name"]
     src_key = f"{file_id}/{file_name}"
@@ -88,8 +99,23 @@ def _process_entry(auth_s3, dest_bucket, dest_prefix, modality_name, entry):
         )
         return "copied"
     except Exception as exc:
-        print(f"  FAILED {file_name}: {exc}", file=sys.stderr)
-        return "failed"
+        is_access_denied = "AccessDenied" in str(exc)
+        if not is_access_denied:
+            print(f"  FAILED {file_name}: {exc}", file=sys.stderr)
+            return "failed"
+        # Fallback: GDC HTTPS data API → authenticated PUT to dest.
+        try:
+            response = requests.get(f"{GDC_DATA_URL}/{file_id}", timeout=300)
+            response.raise_for_status()
+            auth_s3.put_object(
+                Bucket=dest_bucket,
+                Key=dest_key,
+                Body=response.content,
+            )
+            return "copied"
+        except Exception as inner:
+            print(f"  FAILED (after GDC fallback) {file_name}: {inner}", file=sys.stderr)
+            return "failed"
 
 
 def sync_modality(
@@ -140,7 +166,7 @@ def main():
     else:
         projects = ["TCGA-BRCA"]
 
-    # Authenticated client — reads public source bucket and writes to your bucket
+    # Authenticated client — writes to your bucket; primary CopyObject source.
     auth_s3 = boto3.client("s3", region_name="us-east-1")
 
     print(f"Syncing {len(projects)} project(s) → s3://{DEST_BUCKET}/{args.prefix}")

@@ -7,7 +7,7 @@ Three phases mirror the three-step pipeline: get the data out of S3 and into Par
 ## Phases
 
 - [x] **Phase 1: Ingest** - All three modalities stream from S3 via DuckDB, filtered to tumor samples, written to Parquet
-- [ ] **Phase 2: Merge** - Cohort Parquets pivoted and joined into a single wide feature matrix ready for ML
+- [x] **Phase 2: Merge** - Cohort Parquets pivoted and joined into a single wide feature matrix ready for ML
 - [ ] **Phase 3: Classify + Deploy** - XGBoost trains on the merged matrix, SHAP plots produced, full pipeline runs end-to-end on EC2
 
 ## Phase Details
@@ -42,8 +42,8 @@ Plans:
 **Plans**: 2 plans
 
 Plans:
-- [ ] 02-01-PLAN.md — Implement src/merge.py: all transform helpers and merge_all_cohorts() orchestrator
-- [ ] 02-02-PLAN.md — Write tests/test_merge.py (four test classes) and create run_merge.py runner
+- [x] 02-01-PLAN.md — Implement src/merge.py: all transform helpers and merge_all_cohorts() orchestrator
+- [x] 02-02-PLAN.md — Write tests/test_merge.py (four test classes) and create run_merge.py runner
 
 ### Phase 3: Classify + Deploy
 **Goal**: XGBoost produces a test accuracy number and SHAP summary plot from the merged feature matrix, and the entire pipeline runs start-to-finish on EC2
@@ -62,5 +62,5 @@ Plans:
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
 | 1. Ingest | 5/5 | Complete | 2026-04-27 |
-| 2. Merge | 0/2 | Not started | - |
+| 2. Merge | 2/2 | Complete | 2026-04-28 |
 | 3. Classify + Deploy | 0/? | Not started | - |
