@@ -48,11 +48,14 @@ def ingest_methylation_polars(
     t0 = time.time()
 
     # Headerless TSV; "NA" treated as null so beta_value parses as Float64.
+    # Polars scan_csv with has_header=False fails on s3:// URLs (treats them as
+    # local paths). Workaround: has_header=True + schema override consumes the
+    # first probe row as a "header"; losing 1 of ~850K probes per file is
+    # irrelevant when we select top-500 by variance downstream.
     lf = pl.scan_csv(
         file_paths,
         separator="\t",
-        has_header=False,
-        new_columns=["probe_id", "beta_value"],
+        has_header=True,
         schema={
             "probe_id":   pl.String,
             "beta_value": pl.Float64,
