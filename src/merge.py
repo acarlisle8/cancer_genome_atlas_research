@@ -99,6 +99,14 @@ def _pivot_rnaseq(parquet_path: pathlib.Path, top_genes: list[str]) -> pl.DataFr
     )
 
 
+def _arm_sort_key(arm: str) -> tuple[int, int]:
+    """Natural chromosome order: 1p < 1q < 2p < ... < 22q < Xp < Xq."""
+    chrom, side = arm[:-1], arm[-1]
+    chrom_num = 23 if chrom == "X" else int(chrom)
+    side_num = 0 if side == "p" else 1
+    return (chrom_num, side_num)
+
+
 def _pivot_cnv(parquet_path: pathlib.Path) -> pl.DataFrame:
     """Aggregate CNV segments to chromosome-arm means and pivot wide.
 
@@ -117,10 +125,21 @@ def _pivot_cnv(parquet_path: pathlib.Path) -> pl.DataFrame:
     Returns:
         Wide DataFrame with columns: patient_id, <arm_1>, ..., <arm_n>.
     """
-    df = pl.read_parquet(parquet_path)
+    # GDC seg files emit bare "1"/"X"; synthetic test data may use "chr1". Normalize to "chr"-prefix form.
+    lf = pl.scan_parquet(parquet_path).with_columns(
+        pl.when(pl.col("chromosome").str.starts_with("chr"))
+        .then(pl.col("chromosome"))
+        .otherwise(pl.lit("chr") + pl.col("chromosome"))
+        .alias("chromosome")
+    )
 
-    # Drop non-canonical chromosomes (chrM, chrUn_*, etc.) before centromere join
-    df = df.filter(pl.col("chromosome").is_in(list(HG38_CENTROMERES.keys())))
+    df = lf.filter(pl.col("chromosome").is_in(list(_CANONICAL_CHROMS))).collect()
+
+    if df.is_empty():
+        raise RuntimeError(
+            f"_pivot_cnv: no rows survived chromosome filter on {parquet_path} — "
+            f"input parquet has no canonical chromosome values"
+        )
 
     cent_df = pl.DataFrame({
         "chromosome": list(HG38_CENTROMERES.keys()),
@@ -154,9 +173,8 @@ def _pivot_cnv(parquet_path: pathlib.Path) -> pl.DataFrame:
         values="copy_number",
         aggregate_function="first",
     )
-    # Sort arm columns alphabetically so pl.concat across cohorts produces consistent schemas.
-    # group_by output order is non-deterministic; pivot inherits that order.
-    arm_cols = sorted(c for c in wide.columns if c != "patient_id")
+
+    arm_cols = sorted((c for c in wide.columns if c != "patient_id"), key=_arm_sort_key)
     return wide.select(["patient_id"] + arm_cols)
 
 

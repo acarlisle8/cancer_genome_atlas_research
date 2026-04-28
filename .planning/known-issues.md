@@ -38,3 +38,38 @@ even one unlucky cohort doesn't drop a feature globally.
 URI handling. Current pin is whatever `uv.lock` resolves on this branch.
 
 ---
+
+## GDC `Masked Copy Number Segment` files use bare chromosome names ("1", "X")
+
+**First seen:** 2026-04-28, debugging "Merged matrix is empty" error in run_merge.py.
+
+**Symptom:** [src/merge.py](../src/merge.py) `_pivot_cnv` filtered every row out
+of the CNV parquet, then pivoted to an empty wide frame, then the three-way
+inner join in `merge_all_cohorts` produced zero rows for every cohort. Final
+`pl.concat` raised `RuntimeError: Merged matrix is empty`.
+
+**Diagnosis:** The GDC `Masked Copy Number Segment` TSV files store the
+`Chromosome` column as bare values like `"1"`, `"2"`, ..., `"22"`, `"X"` —
+*without* a `"chr"` prefix. Both [src/ingest_cnv.py](../src/ingest_cnv.py) and
+[src/ingest_cnv_polars.py](../src/ingest_cnv_polars.py) preserve this format
+verbatim. Aidan's `_pivot_cnv` filter, however, used
+`pl.col("chromosome").is_in(list(HG38_CENTROMERES.keys()))` where the dict
+keys are `"chr1"..."chr22","chrX"` — so the filter never matched anything.
+Confirmed via DuckDB: `WHERE chromosome IN ('chr1',...) → 0 rows`,
+`WHERE chromosome IN ('1',...) → 463,441 rows`.
+
+The unit tests in `tests/test_merge.py` masked the bug because the synthetic
+fixtures wrote `"chr1"` directly, which matched the filter.
+
+**Workaround:** [src/merge.py](../src/merge.py) `_pivot_cnv` now normalizes the
+chromosome column at the top of the function — adds the `"chr"` prefix
+unconditionally if it's missing. Robust to either input format. The arm-name
+logic later (`str.replace("chr", "")`) was already format-agnostic, so the
+rest of the function is unchanged.
+
+**Cost:** None — the normalization is a one-pass transform on a column that's
+already loaded.
+
+**Revisit when:** GDC standardizes their seg-file format. Don't hold breath.
+
+---
