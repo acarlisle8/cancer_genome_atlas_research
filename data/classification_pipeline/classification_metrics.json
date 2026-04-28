@@ -1,0 +1,106 @@
+{
+  "data_path": "data/model_ready_cohort.parquet",
+  "manifest_path": "data/model_ready_cohort_manifest.json",
+  "package_versions": {
+    "numpy": "2.4.4",
+    "pandas": "3.0.2",
+    "polars": "1.40.0",
+    "scikit_learn": "1.8.0",
+    "xgboost": "3.2.0"
+  },
+  "random_state": 42,
+  "test_size": 0.2,
+  "top_n_features": 300,
+  "n_features_available": 708,
+  "n_features_selected": 300,
+  "label_map": {
+    "BRCA": 0,
+    "LUAD": 1,
+    "PRAD": 2
+  },
+  "train_class_counts": {
+    "BRCA": 875,
+    "LUAD": 412,
+    "PRAD": 396
+  },
+  "test_class_counts": {
+    "BRCA": 219,
+    "LUAD": 103,
+    "PRAD": 99
+  },
+  "accuracy": 0.9928741092636579,
+  "balanced_accuracy": 0.9920054380753941,
+  "macro_f1": 0.992844046891494,
+  "weighted_f1": 0.9928648450910245,
+  "log_loss": 0.013840786203049965,
+  "classification_report": {
+    "BRCA": {
+      "precision": 0.990909090909091,
+      "recall": 0.9954337899543378,
+      "f1-score": 0.9931662870159453,
+      "support": 219.0
+    },
+    "LUAD": {
+      "precision": 0.9901960784313726,
+      "recall": 0.9805825242718447,
+      "f1-score": 0.9853658536585366,
+      "support": 103.0
+    },
+    "PRAD": {
+      "precision": 1.0,
+      "recall": 1.0,
+      "f1-score": 1.0,
+      "support": 99.0
+    },
+    "accuracy": 0.9928741092636579,
+    "macro avg": {
+      "precision": 0.9937017231134879,
+      "recall": 0.9920054380753941,
+      "f1-score": 0.992844046891494,
+      "support": 421.0
+    },
+    "weighted avg": {
+      "precision": 0.9928724156473213,
+      "recall": 0.9928741092636579,
+      "f1-score": 0.9928648450910245,
+      "support": 421.0
+    }
+  },
+  "confusion_matrix": [
+    [
+      218,
+      1,
+      0
+    ],
+    [
+      2,
+      101,
+      0
+    ],
+    [
+      0,
+      0,
+      99
+    ]
+  ],
+  "plot_paths": {
+    "confusion_matrix": "data/classification_pipeline/plots/confusion_matrix.png",
+    "normalized_confusion_matrix": "data/classification_pipeline/plots/confusion_matrix_normalized.png",
+    "feature_importance": "data/classification_pipeline/plots/feature_importance_top25.png",
+    "roc_curves": "data/classification_pipeline/plots/roc_curves.png"
+  },
+  "leakage_notes": [
+    "Train/test split is stratified and happens before variance feature selection.",
+    "Top-variance feature selection is fit on X_train only.",
+    "No imputation or scaling is fit before splitting.",
+    "XGBoost handles NaN feature values natively.",
+    "Balanced sample weights are fit on y_train only.",
+    "The input merged table was already globally feature-selected upstream; rebuild from raw modality tables for the strictest final evaluation."
+  ],
+  "model_path": "data/classification_pipeline/xgboost_cohort_model.json",
+  "metrics_path": "data/classification_pipeline/classification_metrics.json",
+  "selected_features_path": "data/classification_pipeline/selected_features.json",
+  "predictions_path": "data/classification_pipeline/test_predictions.csv",
+  "split_assignments_path": "data/classification_pipeline/split_assignments.csv",
+  "feature_importances_path": "data/classification_pipeline/feature_importances.csv"
+}
