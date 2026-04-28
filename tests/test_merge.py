@@ -28,7 +28,7 @@ def _make_data_dir(tmp: pathlib.Path) -> pathlib.Path:
         # rna_seq.parquet — 3 patients x 10 genes = 30 rows
         # Give each patient different fpkm values so variance > 0 across patients
         rna_rows = [
-            {"patient_id": p, "gene_id": g, "fpkm_unstranded": float(i * 10 + j)}
+            {"patient_id": p, "gene_id": g, "fpkm_uq_unstranded": float(i * 10 + j)}
             for i, p in enumerate(patients)
             for j, g in enumerate(genes)
         ]
@@ -41,14 +41,14 @@ def _make_data_dir(tmp: pathlib.Path) -> pathlib.Path:
         for i, p in enumerate(patients):
             cnv_rows.append({
                 "patient_id": p,
-                "chromosome": "chr1",
+                "chromosome": "1",
                 "start": 1000000,
                 "end": 5000000,
                 "copy_number": 0.1 * i,
             })
             cnv_rows.append({
                 "patient_id": p,
-                "chromosome": "chr1",
+                "chromosome": "1",
                 "start": 130000000,
                 "end": 200000000,
                 "copy_number": -0.1 * i,
@@ -75,7 +75,7 @@ class TestRnaseqPivot(unittest.TestCase):
             d = pathlib.Path(tmp)
             genes = [f"ENSG{i:011d}.1" for i in range(10)]
             rows = [
-                {"patient_id": f"P{i:03d}", "gene_id": g, "fpkm_unstranded": float(i + j)}
+                {"patient_id": f"P{i:03d}", "gene_id": g, "fpkm_uq_unstranded": float(i + j)}
                 for i in range(3)
                 for j, g in enumerate(genes)
             ]
@@ -92,7 +92,7 @@ class TestRnaseqPivot(unittest.TestCase):
             d = pathlib.Path(tmp)
             genes = [f"ENSG{i:011d}.1" for i in range(10)]
             rows = [
-                {"patient_id": f"P{i:03d}", "gene_id": g, "fpkm_unstranded": float(i + j)}
+                {"patient_id": f"P{i:03d}", "gene_id": g, "fpkm_uq_unstranded": float(i + j)}
                 for i in range(3)
                 for j, g in enumerate(genes)
             ]
@@ -110,7 +110,7 @@ class TestRnaseqPivot(unittest.TestCase):
             d = pathlib.Path(tmp)
             genes = [f"ENSG{i:011d}.1" for i in range(10)]
             rows = [
-                {"patient_id": f"P{i:03d}", "gene_id": g, "fpkm_unstranded": float(i + j)}
+                {"patient_id": f"P{i:03d}", "gene_id": g, "fpkm_uq_unstranded": float(i + j)}
                 for i in range(3)
                 for j, g in enumerate(genes)
             ]
@@ -136,7 +136,7 @@ class TestCnvPivot(unittest.TestCase):
                 # p-arm segment: midpoint 3000000 < centromere 123400000
                 rows.append({
                     "patient_id": f"P{i:03d}",
-                    "chromosome": "chr1",
+                    "chromosome": "1",
                     "start": 1000000,
                     "end": 5000000,
                     "copy_number": 0.1 * i,
@@ -144,7 +144,7 @@ class TestCnvPivot(unittest.TestCase):
                 # q-arm segment: midpoint 165000000 > centromere 123400000
                 rows.append({
                     "patient_id": f"P{i:03d}",
-                    "chromosome": "chr1",
+                    "chromosome": "1",
                     "start": 130000000,
                     "end": 200000000,
                     "copy_number": -0.1 * i,
@@ -166,7 +166,7 @@ class TestCnvPivot(unittest.TestCase):
                 # midpoint = (1000000 + 5000000) / 2 = 3000000 < 123400000 -> "1p"
                 {
                     "patient_id": "P000",
-                    "chromosome": "chr1",
+                    "chromosome": "1",
                     "start": 1000000,
                     "end": 5000000,
                     "copy_number": 0.5,
@@ -174,7 +174,7 @@ class TestCnvPivot(unittest.TestCase):
                 # midpoint = (130000000 + 200000000) / 2 = 165000000 > 123400000 -> "1q"
                 {
                     "patient_id": "P000",
-                    "chromosome": "chr1",
+                    "chromosome": "1",
                     "start": 130000000,
                     "end": 200000000,
                     "copy_number": -0.3,
@@ -195,7 +195,7 @@ class TestCnvPivot(unittest.TestCase):
                 # canonical segment — provides a real arm so pivot has output
                 {
                     "patient_id": "P000",
-                    "chromosome": "chr1",
+                    "chromosome": "1",
                     "start": 1000000,
                     "end": 5000000,
                     "copy_number": 0.1,
@@ -203,7 +203,7 @@ class TestCnvPivot(unittest.TestCase):
                 # non-canonical — should be filtered out
                 {
                     "patient_id": "P000",
-                    "chromosome": "chrM",
+                    "chromosome": "M",
                     "start": 1000,
                     "end": 5000,
                     "copy_number": 0.2,
@@ -223,14 +223,14 @@ class TestCnvPivot(unittest.TestCase):
             for i in range(3):
                 rows.append({
                     "patient_id": f"P{i:03d}",
-                    "chromosome": "chr1",
+                    "chromosome": "1",
                     "start": 1000000,
                     "end": 5000000,
                     "copy_number": 0.1 * i,
                 })
                 rows.append({
                     "patient_id": f"P{i:03d}",
-                    "chromosome": "chr1",
+                    "chromosome": "1",
                     "start": 130000000,
                     "end": 200000000,
                     "copy_number": -0.1 * i,
