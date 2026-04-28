@@ -45,13 +45,7 @@ def _top_n_by_variance(
     Returns:
         List of n feature ID strings sorted by descending variance.
     """
-    # Lab-05 memory pattern: project only the columns we need before the
-    # group_by, and use the streaming engine so the aggregation processes
-    # parquet row groups in chunks instead of materializing everything.
-    lf = (
-        pl.scan_parquet([str(p) for p in parquet_paths])
-        .select([id_col, value_col])
-    )
+    lf = pl.scan_parquet([str(p) for p in parquet_paths])
     top = (
         lf
         .group_by(id_col)
@@ -82,7 +76,7 @@ def _pivot_rnaseq(parquet_path: pathlib.Path, top_genes: list[str]) -> pl.DataFr
     return filtered.pivot(
         on="gene_id",
         index="patient_id",
-        values="fpkm_uq_unstranded",
+        values="fpkm_unstranded",
         aggregate_function="mean",
     )
 
@@ -218,7 +212,7 @@ def merge_all_cohorts(data_dir: pathlib.Path, output_dir: pathlib.Path) -> pathl
     meth_paths = [data_dir / c / "methylation.parquet" for c in COHORTS]
 
     logger.info("Computing global top-%d genes by variance across %d cohorts", N_RNA_GENES, len(COHORTS))
-    top_genes = _top_n_by_variance(rna_paths, "gene_id", "fpkm_uq_unstranded", N_RNA_GENES)
+    top_genes = _top_n_by_variance(rna_paths, "gene_id", "fpkm_unstranded", N_RNA_GENES)
 
     logger.info("Computing global top-%d probes by variance across %d cohorts", N_METH_PROBES, len(COHORTS))
     top_probes = _top_n_by_variance(meth_paths, "probe_id", "beta_value", N_METH_PROBES)
