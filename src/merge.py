@@ -261,8 +261,11 @@ def merge_all_cohorts(data_dir: pathlib.Path, output_dir: pathlib.Path) -> pathl
         cohort_dir = data_dir / cohort
 
         rna_wide = _pivot_rnaseq(cohort_dir / "rna_seq.parquet", top_genes)
+        logger.info("  rna_wide  %s", rna_wide.shape)
         cnv_wide = _pivot_cnv(cohort_dir / "cnv.parquet")
+        logger.info("  cnv_wide  %s", cnv_wide.shape)
         meth_wide = _pivot_methylation(cohort_dir / "methylation.parquet", top_probes)
+        logger.info("  meth_wide %s", meth_wide.shape)
 
         merged_cohort = (
             rna_wide
@@ -270,6 +273,7 @@ def merge_all_cohorts(data_dir: pathlib.Path, output_dir: pathlib.Path) -> pathl
             .join(meth_wide, on="patient_id", how="inner")
             .with_columns(pl.lit(label).alias("cohort"))
         )
+        logger.info("  merged_cohort %s (after 3-way inner join)", merged_cohort.shape)
         cohort_frames.append(merged_cohort)
 
     # Stack all cohorts — diagonal_relaxed fills null for any arm columns absent in a cohort
