@@ -7,4 +7,5 @@ CLAUDE.md
 .venv/
 .uv/
 
-data/
+data/*
+!data/merged_all_cohorts.parquet
