@@ -45,8 +45,9 @@ data/
 ```
 
 The **`merged_all_cohorts.parquet`** is the Phase 2 deliverable that Phase 3
-(XGBoost + SHAP) will consume. It's small enough to commit if you want, but
-`.gitignore` currently excludes the entire `data/` directory.
+(XGBoost + SHAP) will consume. It's committed to the repo (carved out as an
+exception in `.gitignore`) so Phase 3 can run against it without re-syncing
+the 17 GB of cohort parquets.
 
 ---
 
@@ -77,9 +78,9 @@ three options:
    ```
    This pulls from `s3://tcga-2-open/` (public) and writes to your bucket.
    Storage cost is on you (~25 GB for 3 cohorts).
-3. **Skip the sync, use the merged output directly**: ask Zachary for
-   `data/merged_all_cohorts.parquet` (11 MB) if all you need is to run
-   Phase 3.
+3. **Skip Phase 1 entirely**: `data/merged_all_cohorts.parquet` (11 MB) is
+   already committed to the repo. If all you need is to run Phase 3, just
+   `git pull` and it's there.
 
 The original DuckDB ingestors (`src/ingest_*.py` without `_polars`) read
 directly from `s3://tcga-2-open/` (public) but were superseded by the polars
