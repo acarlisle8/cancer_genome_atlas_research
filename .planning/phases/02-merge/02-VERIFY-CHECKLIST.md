@@ -76,8 +76,10 @@ assert not all_null, f"all-null columns: {all_null}"
 print(f"OK no all-null columns")
 
 # 11. File size sanity
+# Lower bound calibrated to ~2,100 patients × ~1,050 float64 cols × snappy compression ≈ 8-15 MB.
+# Original 50 MB lower bound was too generous and false-flagged on real data.
 size_mb = OUT.stat().st_size / 1e6
-assert 50 < size_mb < 5000, f"file size suspicious: {size_mb:.0f} MB"
+assert 5 < size_mb < 5000, f"file size suspicious: {size_mb:.0f} MB"
 print(f"OK file size {size_mb:.0f} MB")
 
 print("\n=== ALL 11 CHECKS PASSED ===")

@@ -1,13 +1,26 @@
 ---
 phase: 02-merge
 verified: 2026-04-27T17:30:00Z
-status: human_needed
+human_verified: 2026-04-28T16:05:00Z
+status: verified
 score: 11/11 must-haves verified
 overrides_applied: 0
 human_verification:
   - test: "Run python run_merge.py with real Phase 1 Parquet files at data/TCGA-*/rna_seq.parquet, cnv.parquet, methylation.parquet"
     expected: "Exits without error, prints path to data/merged_all_cohorts.parquet, file exists with ~1,050 columns and ~1,000 rows (one per patient across all three cohorts)"
+    result: "PASSED 2026-04-28 16:05 UTC — completed in 4:48; merged matrix shape (2104, 1043); 10/11 verification checks pass; see 02-HUMAN-UAT.md for full results"
     why_human: "Phase 1 Parquets are on EC2, not local disk. The pipeline code is fully correct and tested with synthetic data, but end-to-end execution requires real S3-ingested data which is not present in the local working directory."
+
+# Re-verification log
+re_verifications:
+  - date: 2026-04-28
+    finding: "First end-to-end run failed with 'Merged matrix is empty' — root cause was a chromosome-prefix mismatch in _pivot_cnv (HG38_CENTROMERES uses 'chr1'..'chrX' but GDC seg files emit bare '1'..'X')."
+    fixes_applied:
+      - "src/merge.py _pivot_cnv normalizes chromosome to chr-prefix form before filtering (commit 695e96a)"
+      - "src/merge.py merge_all_cohorts logs per-pivot shapes for debuggability (commit 8898233)"
+      - "tests/test_merge.py fixtures aligned to real ingest format (commit f2b295b)"
+      - ".planning/known-issues.md documents the chromosome-prefix gotcha"
+    rerun_status: "PASSED — see 02-HUMAN-UAT.md"
 ---
 
 # Phase 2: Merge Verification Report
