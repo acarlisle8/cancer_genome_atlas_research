@@ -1,0 +1,163 @@
+========================================================================
+TCGA SUBTYPE LABEL AUDIT
+========================================================================
+Total patients: 2104
+
+--- SUBTYPE-MARKER GENE COVERAGE IN RNA FEATURES ---
+
+BRCA: 4/20 markers present
+  MISSING from RNA features:
+    ESR1 (ENSG00000091831)
+    PGR (ENSG00000082175)
+    MKI67 (ENSG00000148773)
+    FOXA1 (ENSG00000129514)
+    FOXC1 (ENSG00000054598)
+    BCL2 (ENSG00000171791)
+    CDH1 (ENSG00000039068)
+    MYC (ENSG00000136997)
+    BIRC5 (ENSG00000089685)
+    AURKA (ENSG00000087586)
+    CCNB1 (ENSG00000134057)
+    MYBL2 (ENSG00000101057)
+    EGFR (ENSG00000146648)
+    FGFR4 (ENSG00000160867)
+    CDC20 (ENSG00000117399)
+    MELK (ENSG00000165304)
+
+LUAD: 5/7 markers present
+  MISSING from RNA features:
+    NKX2-1 (ENSG00000136352)
+    TP63 (ENSG00000073282)
+
+PRAD: 0/9 markers present
+  MISSING from RNA features:
+    AR (ENSG00000169083)
+    ERG (ENSG00000157554)
+    ETV1 (ENSG00000006468)
+    ETV4 (ENSG00000175832)
+    FLI1 (ENSG00000151702)
+    SPOP (ENSG00000121067)
+    FOXA1 (ENSG00000129514)
+    PTEN (ENSG00000171862)
+    TP53 (ENSG00000141510)
+
+--- PER-COHORT SUBTYPE COUNTS ---
+
+LUAD (n=515):
+  [hoadley_subtype_mrna]  labeled=0  unlabeled=515
+  [hoadley_subtype_dnameth]  labeled=181  unlabeled=334
+      low : 74
+      intermediate : 70
+      high : 37
+  [hoadley_subtype_protein]  labeled=0  unlabeled=515
+  [hoadley_subtype_mirna]  labeled=0  unlabeled=515
+  [hoadley_subtype_cna]  labeled=0  unlabeled=515
+  [hoadley_subtype_integrative]  labeled=230  unlabeled=285
+      5: 52
+      3: 51
+      6: 41
+      4: 32
+      2: 32
+      1: 22
+  [hoadley_subtype_other]  labeled=0  unlabeled=515
+  [hoadley_subtype_selected]  labeled=230  unlabeled=285
+      LUAD.5: 52
+      LUAD.3: 51
+      LUAD.6: 41
+      LUAD.2: 32
+      LUAD.4: 32
+      LUAD.1: 22
+  [brca_marker_subtype]  labeled=0  unlabeled=515
+  [luad_marker_subtype]  labeled=502  unlabeled=13
+      LUAD: 502
+  [prad_marker_subtype]  labeled=0  unlabeled=515
+  [marker_subtype]  labeled=502  unlabeled=13
+      LUAD: 502
+
+PRAD (n=495):
+  [hoadley_subtype_mrna]  labeled=333  unlabeled=162
+      3: 116
+      1: 112
+      2: 105
+  [hoadley_subtype_dnameth]  labeled=333  unlabeled=162
+      2: 110
+      3: 101
+      4: 81
+      1: 41
+  [hoadley_subtype_protein]  labeled=146  unlabeled=349
+      3: 55
+      1: 52
+      2: 39
+  [hoadley_subtype_mirna]  labeled=330  unlabeled=165
+      1: 139
+      6: 69
+      2: 39
+      4: 35
+      3: 24
+      5: 24
+  [hoadley_subtype_cna]  labeled=333  unlabeled=162
+      Some_SCNA: 167
+      More_SCNA: 108
+      Quiet: 58
+  [hoadley_subtype_integrative]  labeled=333  unlabeled=162
+      3: 139
+      2: 109
+      1: 85
+  [hoadley_subtype_other]  labeled=333  unlabeled=162
+      1-ERG: 152
+      8-other: 86
+      5-SPOP: 37
+      2-ETV1: 28
+      3-ETV4: 14
+      6-FOXA1: 9
+      4-FLI1: 4
+      7-IDH1: 3
+  [hoadley_subtype_selected]  labeled=333  unlabeled=162
+      PRAD.1-ERG: 152
+      PRAD.8-other: 86
+      PRAD.5-SPOP: 37
+      PRAD.2-ETV1: 28
+      PRAD.3-ETV4: 14
+      PRAD.6-FOXA1: 9
+      PRAD.4-FLI1: 4
+      PRAD.7-IDH1: 3
+  [brca_marker_subtype]  labeled=0  unlabeled=495
+  [luad_marker_subtype]  labeled=0  unlabeled=495
+  [prad_marker_subtype]  labeled=479  unlabeled=16
+      PRAD: 479
+  [marker_subtype]  labeled=479  unlabeled=16
+      PRAD: 479
+
+BRCA (n=1094):
+  [hoadley_subtype_mrna]  labeled=1094  unlabeled=0
+      LumA: 554
+      LumB: 208
+      Basal: 185
+      Her2: 79
+      Normal: 68
+  [hoadley_subtype_dnameth]  labeled=0  unlabeled=1094
+  [hoadley_subtype_protein]  labeled=0  unlabeled=1094
+  [hoadley_subtype_mirna]  labeled=0  unlabeled=1094
+  [hoadley_subtype_cna]  labeled=0  unlabeled=1094
+  [hoadley_subtype_integrative]  labeled=0  unlabeled=1094
+  [hoadley_subtype_other]  labeled=0  unlabeled=1094
+  [hoadley_subtype_selected]  labeled=1094  unlabeled=0
+      BRCA.LumA: 554
+      BRCA.LumB: 208
+      BRCA.Basal: 185
+      BRCA.Her2: 79
+      BRCA.Normal: 68
+  [brca_marker_subtype]  labeled=981  unlabeled=113
+      BRCA_LumA: 499
+      BRCA_LumB: 197
+      BRCA_Basal: 171
+      BRCA_Her2: 78
+      BRCA_Normal: 36
+  [luad_marker_subtype]  labeled=0  unlabeled=1094
+  [prad_marker_subtype]  labeled=0  unlabeled=1094
+  [marker_subtype]  labeled=981  unlabeled=113
+      BRCA_LumA: 499
+      BRCA_LumB: 197
+      BRCA_Basal: 171
+      BRCA_Her2: 78
+      BRCA_Normal: 36

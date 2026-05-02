@@ -11,6 +11,51 @@ COHORTS = ["TCGA-BRCA", "TCGA-LUAD", "TCGA-PRAD"]
 N_RNA_GENES = 500
 N_METH_PROBES = 500
 
+# Ensembl base IDs (no version suffix) for canonical subtype marker genes.
+# These are pinned into the feature set regardless of variance rank so that
+# downstream subtype analyses always have the relevant signal available.
+# Sources: PAM50/BRCA (Parker 2009, TCGA 2012), LUAD (Wilkerson 2012,
+# TCGA 2014), PRAD iCluster (TCGA Cell 2015).
+SUBTYPE_MARKER_GENES: frozenset[str] = frozenset({
+    # BRCA PAM50 subset
+    "ENSG00000091831",  # ESR1
+    "ENSG00000082175",  # PGR
+    "ENSG00000141736",  # ERBB2
+    "ENSG00000148773",  # MKI67
+    "ENSG00000129514",  # FOXA1  (also PRAD)
+    "ENSG00000054598",  # FOXC1
+    "ENSG00000171791",  # BCL2
+    "ENSG00000039068",  # CDH1
+    "ENSG00000136997",  # MYC
+    "ENSG00000089685",  # BIRC5
+    "ENSG00000087586",  # AURKA
+    "ENSG00000134057",  # CCNB1
+    "ENSG00000101057",  # MYBL2
+    "ENSG00000186081",  # KRT5  (also LUAD)
+    "ENSG00000186847",  # KRT14
+    "ENSG00000128422",  # KRT17
+    "ENSG00000146648",  # EGFR
+    "ENSG00000160867",  # FGFR4
+    "ENSG00000117399",  # CDC20
+    "ENSG00000165304",  # MELK
+    # LUAD markers
+    "ENSG00000136352",  # NKX2-1
+    "ENSG00000168878",  # SFTPB
+    "ENSG00000168484",  # SFTPC
+    "ENSG00000073282",  # TP63
+    "ENSG00000205420",  # KRT6A
+    "ENSG00000185499",  # MUC1
+    # PRAD markers
+    "ENSG00000169083",  # AR
+    "ENSG00000157554",  # ERG
+    "ENSG00000006468",  # ETV1
+    "ENSG00000175832",  # ETV4
+    "ENSG00000151702",  # FLI1
+    "ENSG00000121067",  # SPOP
+    "ENSG00000171862",  # PTEN
+    "ENSG00000141510",  # TP53
+})
+
 HG38_CENTROMERES = {
     "chr1": 123400000, "chr2": 93900000, "chr3": 90900000,
     "chr4": 50400000, "chr5": 48800000, "chr6": 59800000,
@@ -31,30 +76,53 @@ def _top_n_by_variance(
     id_col: str,
     value_col: str,
     n: int = 500,
+    pinned_base_ids: frozenset[str] | None = None,
 ) -> list[str]:
-    """Return the top-N feature IDs by variance across all cohort Parquets combined.
+    """Return top-N feature IDs by variance, always including pinned features.
 
-    Uses lazy scan to avoid loading all rows into memory simultaneously.
+    Pinned features are matched by Ensembl base ID (stripping the version
+    suffix, e.g. ENSG00000091831.16 -> ENSG00000091831) and consume slots
+    from n, so the total returned is always <= n.
 
     Args:
         parquet_paths: Paths to Parquet files to scan (all cohorts).
-        id_col: Column name for the feature identifier (e.g. "gene_id", "probe_id").
-        value_col: Column name for the numeric value (e.g. "fpkm_unstranded", "beta_value").
-        n: Number of top features to return (default 500).
+        id_col: Column name for the feature identifier.
+        value_col: Column name for the numeric value.
+        n: Total number of features to return (default 500).
+        pinned_base_ids: Ensembl base IDs to force-include regardless of rank.
 
     Returns:
-        List of n feature ID strings sorted by descending variance.
+        List of feature ID strings (versioned if present in data).
     """
     lf = pl.scan_parquet([str(p) for p in parquet_paths])
-    top = (
+    all_stats = (
         lf
         .group_by(id_col)
         .agg(pl.col(value_col).var().alias("variance"))
-        .sort("variance", descending=True, nulls_last=True)
-        .head(n)
         .collect()
     )
-    return top[id_col].to_list()
+
+    if pinned_base_ids:
+        all_stats = all_stats.with_columns(
+            pl.col(id_col).str.split(".").list.first().alias("_base_id")
+        )
+        pinned = all_stats.filter(pl.col("_base_id").is_in(pinned_base_ids))
+        pinned_versioned: set[str] = set(pinned[id_col].to_list())
+        n_fill = max(0, n - len(pinned_versioned))
+        top_var = (
+            all_stats
+            .filter(~pl.col(id_col).is_in(pinned_versioned))
+            .sort("variance", descending=True, nulls_last=True)
+            .head(n_fill)
+        )
+        return pinned[id_col].to_list() + top_var[id_col].to_list()
+
+    return (
+        all_stats
+        .sort("variance", descending=True, nulls_last=True)
+        .head(n)[id_col]
+        .to_list()
+    )
 
 
 def _pivot_rnaseq(parquet_path: pathlib.Path, top_genes: list[str]) -> pl.DataFrame:
@@ -212,7 +280,9 @@ def merge_all_cohorts(data_dir: pathlib.Path, output_dir: pathlib.Path) -> pathl
     meth_paths = [data_dir / c / "methylation.parquet" for c in COHORTS]
 
     logger.info("Computing global top-%d genes by variance across %d cohorts", N_RNA_GENES, len(COHORTS))
-    top_genes = _top_n_by_variance(rna_paths, "gene_id", "fpkm_unstranded", N_RNA_GENES)
+    top_genes = _top_n_by_variance(
+        rna_paths, "gene_id", "fpkm_unstranded", N_RNA_GENES, SUBTYPE_MARKER_GENES
+    )
 
     logger.info("Computing global top-%d probes by variance across %d cohorts", N_METH_PROBES, len(COHORTS))
     top_probes = _top_n_by_variance(meth_paths, "probe_id", "beta_value", N_METH_PROBES)

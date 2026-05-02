@@ -1,0 +1,64 @@
+{
+  "BRCA": {
+    "panel_size": 20,
+    "n_present": 4,
+    "n_missing": 16,
+    "present": {
+      "ERBB2": "ENSG00000141736",
+      "KRT5": "ENSG00000186081",
+      "KRT14": "ENSG00000186847",
+      "KRT17": "ENSG00000128422"
+    },
+    "missing": {
+      "ESR1": "ENSG00000091831",
+      "PGR": "ENSG00000082175",
+      "MKI67": "ENSG00000148773",
+      "FOXA1": "ENSG00000129514",
+      "FOXC1": "ENSG00000054598",
+      "BCL2": "ENSG00000171791",
+      "CDH1": "ENSG00000039068",
+      "MYC": "ENSG00000136997",
+      "BIRC5": "ENSG00000089685",
+      "AURKA": "ENSG00000087586",
+      "CCNB1": "ENSG00000134057",
+      "MYBL2": "ENSG00000101057",
+      "EGFR": "ENSG00000146648",
+      "FGFR4": "ENSG00000160867",
+      "CDC20": "ENSG00000117399",
+      "MELK": "ENSG00000165304"
+    }
+  },
+  "LUAD": {
+    "panel_size": 7,
+    "n_present": 5,
+    "n_missing": 2,
+    "present": {
+      "SFTPB": "ENSG00000168878",
+      "SFTPC": "ENSG00000168484",
+      "KRT5": "ENSG00000186081",
+      "KRT6A": "ENSG00000205420",
+      "MUC1": "ENSG00000185499"
+    },
+    "missing": {
+      "NKX2-1": "ENSG00000136352",
+      "TP63": "ENSG00000073282"
+    }
+  },
+  "PRAD": {
+    "panel_size": 9,
+    "n_present": 0,
+    "n_missing": 9,
+    "present": {},
+    "missing": {
+      "AR": "ENSG00000169083",
+      "ERG": "ENSG00000157554",
+      "ETV1": "ENSG00000006468",
+      "ETV4": "ENSG00000175832",
+      "FLI1": "ENSG00000151702",
+      "SPOP": "ENSG00000121067",
+      "FOXA1": "ENSG00000129514",
+      "PTEN": "ENSG00000171862",
+      "TP53": "ENSG00000141510"
+    }
+  }
+}

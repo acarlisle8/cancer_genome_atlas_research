@@ -1,0 +1,344 @@
+{
+  "LUAD": {
+    "n_patients": 515,
+    "by_source": {
+      "hoadley_subtype_mrna": {
+        "n_labeled": 0,
+        "n_unlabeled": 515,
+        "counts": {
+          "__null__": 515
+        }
+      },
+      "hoadley_subtype_dnameth": {
+        "n_labeled": 181,
+        "n_unlabeled": 334,
+        "counts": {
+          "__null__": 334,
+          "low ": 74,
+          "intermediate ": 70,
+          "high ": 37
+        }
+      },
+      "hoadley_subtype_protein": {
+        "n_labeled": 0,
+        "n_unlabeled": 515,
+        "counts": {
+          "__null__": 515
+        }
+      },
+      "hoadley_subtype_mirna": {
+        "n_labeled": 0,
+        "n_unlabeled": 515,
+        "counts": {
+          "__null__": 515
+        }
+      },
+      "hoadley_subtype_cna": {
+        "n_labeled": 0,
+        "n_unlabeled": 515,
+        "counts": {
+          "__null__": 515
+        }
+      },
+      "hoadley_subtype_integrative": {
+        "n_labeled": 230,
+        "n_unlabeled": 285,
+        "counts": {
+          "__null__": 285,
+          "5": 52,
+          "3": 51,
+          "6": 41,
+          "4": 32,
+          "2": 32,
+          "1": 22
+        }
+      },
+      "hoadley_subtype_other": {
+        "n_labeled": 0,
+        "n_unlabeled": 515,
+        "counts": {
+          "__null__": 515
+        }
+      },
+      "hoadley_subtype_selected": {
+        "n_labeled": 230,
+        "n_unlabeled": 285,
+        "counts": {
+          "__null__": 285,
+          "LUAD.5": 52,
+          "LUAD.3": 51,
+          "LUAD.6": 41,
+          "LUAD.2": 32,
+          "LUAD.4": 32,
+          "LUAD.1": 22
+        }
+      },
+      "brca_marker_subtype": {
+        "n_labeled": 0,
+        "n_unlabeled": 515,
+        "counts": {
+          "__null__": 515
+        }
+      },
+      "luad_marker_subtype": {
+        "n_labeled": 502,
+        "n_unlabeled": 13,
+        "counts": {
+          "LUAD": 502,
+          "__null__": 13
+        }
+      },
+      "prad_marker_subtype": {
+        "n_labeled": 0,
+        "n_unlabeled": 515,
+        "counts": {
+          "__null__": 515
+        }
+      },
+      "marker_subtype": {
+        "n_labeled": 502,
+        "n_unlabeled": 13,
+        "counts": {
+          "LUAD": 502,
+          "__null__": 13
+        }
+      }
+    }
+  },
+  "PRAD": {
+    "n_patients": 495,
+    "by_source": {
+      "hoadley_subtype_mrna": {
+        "n_labeled": 333,
+        "n_unlabeled": 162,
+        "counts": {
+          "__null__": 162,
+          "3": 116,
+          "1": 112,
+          "2": 105
+        }
+      },
+      "hoadley_subtype_dnameth": {
+        "n_labeled": 333,
+        "n_unlabeled": 162,
+        "counts": {
+          "__null__": 162,
+          "2": 110,
+          "3": 101,
+          "4": 81,
+          "1": 41
+        }
+      },
+      "hoadley_subtype_protein": {
+        "n_labeled": 146,
+        "n_unlabeled": 349,
+        "counts": {
+          "__null__": 349,
+          "3": 55,
+          "1": 52,
+          "2": 39
+        }
+      },
+      "hoadley_subtype_mirna": {
+        "n_labeled": 330,
+        "n_unlabeled": 165,
+        "counts": {
+          "__null__": 165,
+          "1": 139,
+          "6": 69,
+          "2": 39,
+          "4": 35,
+          "3": 24,
+          "5": 24
+        }
+      },
+      "hoadley_subtype_cna": {
+        "n_labeled": 333,
+        "n_unlabeled": 162,
+        "counts": {
+          "Some_SCNA": 167,
+          "__null__": 162,
+          "More_SCNA": 108,
+          "Quiet": 58
+        }
+      },
+      "hoadley_subtype_integrative": {
+        "n_labeled": 333,
+        "n_unlabeled": 162,
+        "counts": {
+          "__null__": 162,
+          "3": 139,
+          "2": 109,
+          "1": 85
+        }
+      },
+      "hoadley_subtype_other": {
+        "n_labeled": 333,
+        "n_unlabeled": 162,
+        "counts": {
+          "__null__": 162,
+          "1-ERG": 152,
+          "8-other": 86,
+          "5-SPOP": 37,
+          "2-ETV1": 28,
+          "3-ETV4": 14,
+          "6-FOXA1": 9,
+          "4-FLI1": 4,
+          "7-IDH1": 3
+        }
+      },
+      "hoadley_subtype_selected": {
+        "n_labeled": 333,
+        "n_unlabeled": 162,
+        "counts": {
+          "__null__": 162,
+          "PRAD.1-ERG": 152,
+          "PRAD.8-other": 86,
+          "PRAD.5-SPOP": 37,
+          "PRAD.2-ETV1": 28,
+          "PRAD.3-ETV4": 14,
+          "PRAD.6-FOXA1": 9,
+          "PRAD.4-FLI1": 4,
+          "PRAD.7-IDH1": 3
+        }
+      },
+      "brca_marker_subtype": {
+        "n_labeled": 0,
+        "n_unlabeled": 495,
+        "counts": {
+          "__null__": 495
+        }
+      },
+      "luad_marker_subtype": {
+        "n_labeled": 0,
+        "n_unlabeled": 495,
+        "counts": {
+          "__null__": 495
+        }
+      },
+      "prad_marker_subtype": {
+        "n_labeled": 479,
+        "n_unlabeled": 16,
+        "counts": {
+          "PRAD": 479,
+          "__null__": 16
+        }
+      },
+      "marker_subtype": {
+        "n_labeled": 479,
+        "n_unlabeled": 16,
+        "counts": {
+          "PRAD": 479,
+          "__null__": 16
+        }
+      }
+    }
+  },
+  "BRCA": {
+    "n_patients": 1094,
+    "by_source": {
+      "hoadley_subtype_mrna": {
+        "n_labeled": 1094,
+        "n_unlabeled": 0,
+        "counts": {
+          "LumA": 554,
+          "LumB": 208,
+          "Basal": 185,
+          "Her2": 79,
+          "Normal": 68
+        }
+      },
+      "hoadley_subtype_dnameth": {
+        "n_labeled": 0,
+        "n_unlabeled": 1094,
+        "counts": {
+          "__null__": 1094
+        }
+      },
+      "hoadley_subtype_protein": {
+        "n_labeled": 0,
+        "n_unlabeled": 1094,
+        "counts": {
+          "__null__": 1094
+        }
+      },
+      "hoadley_subtype_mirna": {
+        "n_labeled": 0,
+        "n_unlabeled": 1094,
+        "counts": {
+          "__null__": 1094
+        }
+      },
+      "hoadley_subtype_cna": {
+        "n_labeled": 0,
+        "n_unlabeled": 1094,
+        "counts": {
+          "__null__": 1094
+        }
+      },
+      "hoadley_subtype_integrative": {
+        "n_labeled": 0,
+        "n_unlabeled": 1094,
+        "counts": {
+          "__null__": 1094
+        }
+      },
+      "hoadley_subtype_other": {
+        "n_labeled": 0,
+        "n_unlabeled": 1094,
+        "counts": {
+          "__null__": 1094
+        }
+      },
+      "hoadley_subtype_selected": {
+        "n_labeled": 1094,
+        "n_unlabeled": 0,
+        "counts": {
+          "BRCA.LumA": 554,
+          "BRCA.LumB": 208,
+          "BRCA.Basal": 185,
+          "BRCA.Her2": 79,
+          "BRCA.Normal": 68
+        }
+      },
+      "brca_marker_subtype": {
+        "n_labeled": 981,
+        "n_unlabeled": 113,
+        "counts": {
+          "BRCA_LumA": 499,
+          "BRCA_LumB": 197,
+          "BRCA_Basal": 171,
+          "__null__": 113,
+          "BRCA_Her2": 78,
+          "BRCA_Normal": 36
+        }
+      },
+      "luad_marker_subtype": {
+        "n_labeled": 0,
+        "n_unlabeled": 1094,
+        "counts": {
+          "__null__": 1094
+        }
+      },
+      "prad_marker_subtype": {
+        "n_labeled": 0,
+        "n_unlabeled": 1094,
+        "counts": {
+          "__null__": 1094
+        }
+      },
+      "marker_subtype": {
+        "n_labeled": 981,
+        "n_unlabeled": 113,
+        "counts": {
+          "BRCA_LumA": 499,
+          "BRCA_LumB": 197,
+          "BRCA_Basal": 171,
+          "__null__": 113,
+          "BRCA_Her2": 78,
+          "BRCA_Normal": 36
+        }
+      }
+    }
+  }
+}
