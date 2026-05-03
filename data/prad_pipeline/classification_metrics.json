@@ -1,0 +1,133 @@
+{
+  "data_path": "data/model_ready_prad.parquet",
+  "manifest_path": "data/model_ready_prad_manifest.json",
+  "package_versions": {
+    "numpy": "2.4.4",
+    "pandas": "3.0.2",
+    "polars": "1.40.0",
+    "scikit_learn": "1.8.0",
+    "xgboost": "3.2.0"
+  },
+  "random_state": 42,
+  "n_folds": 5,
+  "cv_scores": {
+    "accuracy": {
+      "mean": 0.8230212573496155,
+      "std": 0.042153163172591865
+    },
+    "balanced_accuracy": {
+      "mean": 0.6541654978962133,
+      "std": 0.0480470027534233
+    },
+    "macro_f1": {
+      "mean": 0.6594651124666175,
+      "std": 0.06468071496021172
+    },
+    "log_loss": {
+      "mean": 0.5544932501526671,
+      "std": 0.16610563566118122
+    }
+  },
+  "n_features": 703,
+  "label_map": {
+    "PRAD.1-ERG": 0,
+    "PRAD.2-ETV1": 1,
+    "PRAD.5-SPOP": 2,
+    "PRAD.8-other": 3
+  },
+  "class_counts": {
+    "PRAD.1-ERG": 152,
+    "PRAD.2-ETV1": 28,
+    "PRAD.5-SPOP": 37,
+    "PRAD.8-other": 116
+  },
+  "accuracy": 0.8230212573496155,
+  "balanced_accuracy": 0.6541654978962133,
+  "macro_f1": 0.6594651124666175,
+  "weighted_f1": 0.8037091809027227,
+  "log_loss": 0.5544932501526671,
+  "classification_report": {
+    "PRAD.1-ERG": {
+      "precision": 0.891566265060241,
+      "recall": 0.9736842105263158,
+      "f1-score": 0.9308176100628931,
+      "support": 152.0
+    },
+    "PRAD.2-ETV1": {
+      "precision": 0.5555555555555556,
+      "recall": 0.17857142857142858,
+      "f1-score": 0.2702702702702703,
+      "support": 28.0
+    },
+    "PRAD.5-SPOP": {
+      "precision": 0.7666666666666667,
+      "recall": 0.6216216216216216,
+      "f1-score": 0.6865671641791045,
+      "support": 37.0
+    },
+    "PRAD.8-other": {
+      "precision": 0.765625,
+      "recall": 0.8448275862068966,
+      "f1-score": 0.8032786885245902,
+      "support": 116.0
+    },
+    "accuracy": 0.8228228228228228,
+    "macro avg": {
+      "precision": 0.7448533718206158,
+      "recall": 0.6546762117315656,
+      "f1-score": 0.6727334332592145,
+      "support": 333.0
+    },
+    "weighted avg": {
+      "precision": 0.8055639474816182,
+      "recall": 0.8228228228228228,
+      "f1-score": 0.8037091809027227,
+      "support": 333.0
+    }
+  },
+  "confusion_matrix": [
+    [
+      148,
+      0,
+      0,
+      4
+    ],
+    [
+      11,
+      5,
+      0,
+      12
+    ],
+    [
+      0,
+      0,
+      23,
+      14
+    ],
+    [
+      7,
+      4,
+      7,
+      98
+    ]
+  ],
+  "plot_paths": {
+    "confusion_matrix": "data/prad_pipeline/plots/confusion_matrix.png",
+    "normalized_confusion_matrix": "data/prad_pipeline/plots/confusion_matrix_normalized.png",
+    "feature_importance": "data/prad_pipeline/plots/feature_importance_top25.png",
+    "roc_curves": "data/prad_pipeline/plots/roc_curves.png"
+  },
+  "leakage_notes": [
+    "Stratified 5-fold CV \u2014 no patient appears in both train and val for their own fold.",
+    "No imputation or scaling is fit before splitting.",
+    "XGBoost handles NaN feature values natively.",
+    "Balanced sample weights are fit on training fold only, never on val.",
+    "Final model is refit on full dataset for feature importances and the model artifact.",
+    "OOF predictions cover all patients and are used for confusion matrix, ROC curves, and test_predictions.csv."
+  ],
+  "model_path": "data/prad_pipeline/xgboost_subtype_model.json",
+  "metrics_path": "data/prad_pipeline/classification_metrics.json",
+  "predictions_path": "data/prad_pipeline/test_predictions.csv",
+  "split_assignments_path": "data/prad_pipeline/split_assignments.csv",
+  "feature_importances_path": "data/prad_pipeline/feature_importances.csv"
+}

@@ -1,5 +1,6 @@
 """GDC API manifest fetcher and DuckDB S3 connection factory for TCGA data."""
 import os
+import pathlib
 
 import duckdb
 import requests
@@ -83,6 +84,33 @@ def fetch_manifest(
         )
 
     return result
+
+
+def download_file(file_id: str, file_name: str, dest_dir: pathlib.Path) -> pathlib.Path:
+    """Download a single GDC file from the public TCGA S3 bucket.
+
+    Skips download if the destination file already exists (safe to re-run).
+
+    Args:
+        file_id:  GDC file UUID.
+        file_name: Original file name from the GDC manifest.
+        dest_dir: Local directory to write the file into.
+
+    Returns:
+        pathlib.Path to the local file.
+    """
+    import s3fs
+
+    dest_path = dest_dir / file_name
+    if dest_path.exists():
+        return dest_path
+
+    dest_dir.mkdir(parents=True, exist_ok=True)
+    s3 = s3fs.S3FileSystem(anon=True)
+    s3_path = f"s3://tcga-2-open/{file_id}/{file_name}"
+    with s3.open(s3_path, "rb") as remote, open(dest_path, "wb") as local:
+        local.write(remote.read())
+    return dest_path
 
 
 def get_duckdb_conn(db_path: str = ":memory:") -> duckdb.DuckDBPyConnection:

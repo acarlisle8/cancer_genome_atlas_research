@@ -1,0 +1,173 @@
+{
+  "data_path": "data/model_ready_luad.parquet",
+  "manifest_path": "data/model_ready_luad_manifest.json",
+  "package_versions": {
+    "numpy": "2.4.4",
+    "pandas": "3.0.2",
+    "polars": "1.40.0",
+    "scikit_learn": "1.8.0",
+    "xgboost": "3.2.0"
+  },
+  "random_state": 42,
+  "n_folds": 5,
+  "cv_scores": {
+    "accuracy": {
+      "mean": 0.6043478260869566,
+      "std": 0.07327086759283791
+    },
+    "balanced_accuracy": {
+      "mean": 0.5958597883597884,
+      "std": 0.0923595732819374
+    },
+    "macro_f1": {
+      "mean": 0.5917708068791661,
+      "std": 0.08208534486172016
+    },
+    "log_loss": {
+      "mean": 0.9879079743813379,
+      "std": 0.1485412688668114
+    }
+  },
+  "n_features": 708,
+  "label_map": {
+    "LUAD.2": 0,
+    "LUAD.3": 1,
+    "LUAD.4": 2,
+    "LUAD.5": 3,
+    "LUAD.6": 4,
+    "LUAD.other": 5
+  },
+  "class_counts": {
+    "LUAD.2": 32,
+    "LUAD.3": 51,
+    "LUAD.4": 32,
+    "LUAD.5": 52,
+    "LUAD.6": 41,
+    "LUAD.other": 22
+  },
+  "accuracy": 0.6043478260869566,
+  "balanced_accuracy": 0.5958597883597884,
+  "macro_f1": 0.5917708068791661,
+  "weighted_f1": 0.6031847831575805,
+  "log_loss": 0.9879079743813379,
+  "classification_report": {
+    "LUAD.2": {
+      "precision": 0.5675675675675675,
+      "recall": 0.65625,
+      "f1-score": 0.6086956521739131,
+      "support": 32.0
+    },
+    "LUAD.3": {
+      "precision": 0.6078431372549019,
+      "recall": 0.6078431372549019,
+      "f1-score": 0.6078431372549019,
+      "support": 51.0
+    },
+    "LUAD.4": {
+      "precision": 0.5714285714285714,
+      "recall": 0.5,
+      "f1-score": 0.5333333333333333,
+      "support": 32.0
+    },
+    "LUAD.5": {
+      "precision": 0.5769230769230769,
+      "recall": 0.5769230769230769,
+      "f1-score": 0.5769230769230769,
+      "support": 52.0
+    },
+    "LUAD.6": {
+      "precision": 0.6744186046511628,
+      "recall": 0.7073170731707317,
+      "f1-score": 0.6904761904761905,
+      "support": 41.0
+    },
+    "LUAD.other": {
+      "precision": 0.631578947368421,
+      "recall": 0.5454545454545454,
+      "f1-score": 0.5853658536585366,
+      "support": 22.0
+    },
+    "accuracy": 0.6043478260869565,
+    "macro avg": {
+      "precision": 0.6049599841989503,
+      "recall": 0.5989646388005426,
+      "f1-score": 0.6004395406366588,
+      "support": 230.0
+    },
+    "weighted avg": {
+      "precision": 0.6043207655681712,
+      "recall": 0.6043478260869565,
+      "f1-score": 0.6031847831575805,
+      "support": 230.0
+    }
+  },
+  "confusion_matrix": [
+    [
+      21,
+      4,
+      1,
+      1,
+      3,
+      2
+    ],
+    [
+      4,
+      31,
+      6,
+      6,
+      4,
+      0
+    ],
+    [
+      2,
+      4,
+      16,
+      7,
+      2,
+      1
+    ],
+    [
+      1,
+      9,
+      4,
+      30,
+      4,
+      4
+    ],
+    [
+      4,
+      3,
+      1,
+      4,
+      29,
+      0
+    ],
+    [
+      5,
+      0,
+      0,
+      4,
+      1,
+      12
+    ]
+  ],
+  "plot_paths": {
+    "confusion_matrix": "data/luad_pipeline/plots/confusion_matrix.png",
+    "normalized_confusion_matrix": "data/luad_pipeline/plots/confusion_matrix_normalized.png",
+    "feature_importance": "data/luad_pipeline/plots/feature_importance_top25.png",
+    "roc_curves": "data/luad_pipeline/plots/roc_curves.png"
+  },
+  "leakage_notes": [
+    "Stratified 5-fold CV \u2014 no patient appears in both train and val for their own fold.",
+    "No imputation or scaling is fit before splitting.",
+    "XGBoost handles NaN feature values natively.",
+    "Balanced sample weights are fit on training fold only, never on val.",
+    "Final model is refit on full dataset for feature importances and the model artifact.",
+    "OOF predictions cover all patients and are used for confusion matrix, ROC curves, and test_predictions.csv."
+  ],
+  "model_path": "data/luad_pipeline/xgboost_subtype_model.json",
+  "metrics_path": "data/luad_pipeline/classification_metrics.json",
+  "predictions_path": "data/luad_pipeline/test_predictions.csv",
+  "split_assignments_path": "data/luad_pipeline/split_assignments.csv",
+  "feature_importances_path": "data/luad_pipeline/feature_importances.csv"
+}

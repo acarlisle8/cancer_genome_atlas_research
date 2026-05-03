@@ -1,0 +1,152 @@
+{
+  "data_path": "data/model_ready_brca.parquet",
+  "manifest_path": "data/model_ready_brca_manifest.json",
+  "package_versions": {
+    "numpy": "2.4.4",
+    "pandas": "3.0.2",
+    "polars": "1.40.0",
+    "scikit_learn": "1.8.0",
+    "xgboost": "3.2.0"
+  },
+  "random_state": 42,
+  "n_folds": 5,
+  "cv_scores": {
+    "accuracy": {
+      "mean": 0.8171547065476938,
+      "std": 0.022836121267512798
+    },
+    "balanced_accuracy": {
+      "mean": 0.7264400742083668,
+      "std": 0.04062765202561287
+    },
+    "macro_f1": {
+      "mean": 0.7353514736765439,
+      "std": 0.03770617406547652
+    },
+    "log_loss": {
+      "mean": 0.46758105584888315,
+      "std": 0.02681873538229254
+    }
+  },
+  "n_features": 541,
+  "label_map": {
+    "BRCA.Basal": 0,
+    "BRCA.Her2": 1,
+    "BRCA.LumA": 2,
+    "BRCA.LumB": 3,
+    "BRCA.Normal": 4
+  },
+  "class_counts": {
+    "BRCA.Basal": 185,
+    "BRCA.Her2": 79,
+    "BRCA.LumA": 554,
+    "BRCA.LumB": 208,
+    "BRCA.Normal": 68
+  },
+  "accuracy": 0.8171547065476938,
+  "balanced_accuracy": 0.7264400742083668,
+  "macro_f1": 0.7353514736765439,
+  "weighted_f1": 0.8127254359322873,
+  "log_loss": 0.46758105584888315,
+  "classification_report": {
+    "BRCA.Basal": {
+      "precision": 0.9210526315789473,
+      "recall": 0.9459459459459459,
+      "f1-score": 0.9333333333333333,
+      "support": 185.0
+    },
+    "BRCA.Her2": {
+      "precision": 0.7866666666666666,
+      "recall": 0.7468354430379747,
+      "f1-score": 0.7662337662337663,
+      "support": 79.0
+    },
+    "BRCA.LumA": {
+      "precision": 0.8441780821917808,
+      "recall": 0.8898916967509025,
+      "f1-score": 0.8664323374340949,
+      "support": 554.0
+    },
+    "BRCA.LumB": {
+      "precision": 0.743455497382199,
+      "recall": 0.6826923076923077,
+      "f1-score": 0.7117794486215538,
+      "support": 208.0
+    },
+    "BRCA.Normal": {
+      "precision": 0.46296296296296297,
+      "recall": 0.36764705882352944,
+      "f1-score": 0.4098360655737705,
+      "support": 68.0
+    },
+    "accuracy": 0.8171846435100548,
+    "macro avg": {
+      "precision": 0.7516631681565114,
+      "recall": 0.726602490450132,
+      "f1-score": 0.7375229902393038,
+      "support": 1094.0
+    },
+    "weighted avg": {
+      "precision": 0.8101794204570361,
+      "recall": 0.8171846435100548,
+      "f1-score": 0.8127254359322873,
+      "support": 1094.0
+    }
+  },
+  "confusion_matrix": [
+    [
+      175,
+      3,
+      0,
+      0,
+      7
+    ],
+    [
+      2,
+      59,
+      5,
+      7,
+      6
+    ],
+    [
+      1,
+      6,
+      493,
+      42,
+      12
+    ],
+    [
+      1,
+      3,
+      58,
+      142,
+      4
+    ],
+    [
+      11,
+      4,
+      28,
+      0,
+      25
+    ]
+  ],
+  "plot_paths": {
+    "confusion_matrix": "data/brca_pipeline/plots/confusion_matrix.png",
+    "normalized_confusion_matrix": "data/brca_pipeline/plots/confusion_matrix_normalized.png",
+    "feature_importance": "data/brca_pipeline/plots/feature_importance_top25.png",
+    "roc_curves": "data/brca_pipeline/plots/roc_curves.png"
+  },
+  "leakage_notes": [
+    "Stratified 5-fold CV \u2014 no patient appears in both train and val for their own fold.",
+    "No imputation or scaling is fit before splitting.",
+    "XGBoost handles NaN feature values natively.",
+    "Balanced sample weights are fit on training fold only, never on val.",
+    "Final model is refit on full dataset for feature importances and the model artifact.",
+    "OOF predictions cover all patients and are used for confusion matrix, ROC curves, and test_predictions.csv."
+  ],
+  "model_path": "data/brca_pipeline/xgboost_subtype_model.json",
+  "metrics_path": "data/brca_pipeline/classification_metrics.json",
+  "predictions_path": "data/brca_pipeline/test_predictions.csv",
+  "split_assignments_path": "data/brca_pipeline/split_assignments.csv",
+  "feature_importances_path": "data/brca_pipeline/feature_importances.csv"
+}

@@ -1,8 +1,8 @@
-"""Train and evaluate a reproducible XGBoost cohort classifier.
+"""Train and evaluate a reproducible XGBoost classifier.
 
-This script starts from the split-ready table produced by run_preprocess.py.
-It avoids leakage by splitting before train-only feature selection and by
-excluding patient_id/cohort/cohort_code from the feature matrix.
+This script starts from the split-ready table produced by run_preprocess.py or
+run_preprocess_subtype.py. It uses stratified 5-fold CV and excludes
+patient_id and target columns from the feature matrix to prevent leakage.
 """
 
 from __future__ import annotations
@@ -34,7 +34,7 @@ from sklearn.metrics import (
     log_loss,
     RocCurveDisplay,
 )
-from sklearn.model_selection import train_test_split
+from sklearn.model_selection import StratifiedKFold
 from sklearn.utils.class_weight import compute_sample_weight
 from xgboost import XGBClassifier
 
@@ -128,26 +128,10 @@ def load_manifest(path: pathlib.Path) -> dict[str, Any]:
     return json.loads(path.read_text())
 
 
-def select_top_variance_features(
-    X_train: pd.DataFrame,
-    feature_cols: list[str],
-    top_n_features: int | None,
-) -> list[str]:
-    """Select top-N variance features using training data only."""
-    if top_n_features is None or top_n_features <= 0 or top_n_features >= len(feature_cols):
-        return feature_cols
-
-    variances = X_train[feature_cols].var(axis=0, skipna=True)
-    variances = variances.replace([np.inf, -np.inf], np.nan).fillna(-np.inf)
-    return variances.sort_values(ascending=False).head(top_n_features).index.to_list()
-
-
 def train_and_evaluate(
     data_path: pathlib.Path,
     manifest_path: pathlib.Path,
     output_dir: pathlib.Path,
-    test_size: float,
-    top_n_features: int | None,
     random_state: int,
 ) -> dict[str, Any]:
     manifest = load_manifest(manifest_path)
@@ -155,40 +139,80 @@ def train_and_evaluate(
     code_to_label = {int(code): label for label, code in label_map.items()}
     class_names = [code_to_label[i] for i in sorted(code_to_label)]
 
+    target_col = manifest.get("target_column", TARGET_COL)
+    target_code_col = manifest.get("target_code_column", TARGET_CODE_COL)
+
     df = pl.read_parquet(data_path).to_pandas()
     feature_cols = manifest["feature_columns"]
-    forbidden = {ID_COL, TARGET_COL, TARGET_CODE_COL}
+    forbidden = {ID_COL, target_col, target_code_col}
     leaked_features = sorted(forbidden.intersection(feature_cols))
     if leaked_features:
         raise ValueError(f"Forbidden columns found in feature list: {leaked_features}")
 
     X = df[feature_cols]
-    y = df[TARGET_CODE_COL].astype(int)
+    y = df[target_code_col].astype(int)
+    patient_ids = df[ID_COL]
+    target_labels = df[target_col]
 
-    (
-        X_train,
-        X_test,
-        y_train,
-        y_test,
-        train_ids,
-        test_ids,
-        train_labels,
-        test_labels,
-    ) = train_test_split(
-        X,
-        y,
-        df[ID_COL],
-        df[TARGET_COL],
-        test_size=test_size,
-        stratify=y,
-        random_state=random_state,
-    )
+    skf = StratifiedKFold(n_splits=5, shuffle=True, random_state=random_state)
 
-    selected_features = select_top_variance_features(X_train, feature_cols, top_n_features)
-    X_train_selected = X_train[selected_features]
-    X_test_selected = X_test[selected_features]
+    fold_accuracies: list[float] = []
+    fold_balanced_accuracies: list[float] = []
+    fold_macro_f1s: list[float] = []
+    fold_log_losses: list[float] = []
+    oof_rows: list[dict[str, Any]] = []
 
-    sample_weight = compute_sample_weight(class_weight="balanced", y=y_train)
+    for fold_idx, (train_idx, val_idx) in enumerate(skf.split(X, y)):
+        X_train, X_val = X.iloc[train_idx], X.iloc[val_idx]
+        y_train, y_val = y.iloc[train_idx], y.iloc[val_idx]
+
+        sample_weight = compute_sample_weight(class_weight="balanced", y=y_train)
+        fold_model = XGBClassifier(
+            objective="multi:softprob",
+            num_class=len(class_names),
+            eval_metric="mlogloss",
+            n_estimators=400,
+            max_depth=4,
+            learning_rate=0.05,
+            subsample=0.9,
+            colsample_bytree=0.8,
+            reg_lambda=1.0,
+            random_state=random_state,
+            n_jobs=4,
+            missing=np.nan,
+            tree_method="hist",
+        )
+        fold_model.fit(X_train, y_train, sample_weight=sample_weight)
+
+        fold_probs = fold_model.predict_proba(X_val)
+        fold_preds = np.asarray(fold_probs).argmax(axis=1)
+
+        fold_accuracies.append(float(accuracy_score(y_val, fold_preds)))
+        fold_balanced_accuracies.append(float(balanced_accuracy_score(y_val, fold_preds)))
+        fold_macro_f1s.append(float(f1_score(y_val, fold_preds, average="macro", zero_division=0)))
+        fold_log_losses.append(float(log_loss(y_val, fold_probs, labels=sorted(code_to_label))))
+
+        for i, orig_idx in enumerate(val_idx):
+            prob_dict = {f"prob_{class_names[j]}": float(fold_probs[i, j]) for j in range(len(class_names))}
+            oof_rows.append({
+                ID_COL: patient_ids.iloc[orig_idx],
+                "fold": fold_idx,
+                target_col: target_labels.iloc[orig_idx],
+                "actual_code": int(y_val.iloc[i]),
+                f"actual_{target_col}": target_labels.iloc[orig_idx],
+                f"predicted_{target_col}": code_to_label[int(fold_preds[i])],
+                "predicted_code": int(fold_preds[i]),
+                **prob_dict,
+            })
+
+    cv_scores = {
+        "accuracy":          {"mean": float(np.mean(fold_accuracies)),          "std": float(np.std(fold_accuracies))},
+        "balanced_accuracy": {"mean": float(np.mean(fold_balanced_accuracies)), "std": float(np.std(fold_balanced_accuracies))},
+        "macro_f1":          {"mean": float(np.mean(fold_macro_f1s)),           "std": float(np.std(fold_macro_f1s))},
+        "log_loss":          {"mean": float(np.mean(fold_log_losses)),          "std": float(np.std(fold_log_losses))},
+    }
+
+    full_sample_weight = compute_sample_weight(class_weight="balanced", y=y)
     model = XGBClassifier(
         objective="multi:softprob",
         num_class=len(class_names),
@@ -204,21 +228,24 @@ def train_and_evaluate(
         missing=np.nan,
         tree_method="hist",
     )
-    model.fit(X_train_selected, y_train, sample_weight=sample_weight)
-
-    probabilities = model.predict_proba(X_test_selected)
-    predictions = np.asarray(probabilities).argmax(axis=1)
+    model.fit(X, y, sample_weight=full_sample_weight)
 
     importance_frame = pd.DataFrame(
         {
-            "feature": selected_features,
+            "feature": feature_cols,
             "importance": model.feature_importances_,
         }
     ).sort_values("importance", ascending=False)
+
+    oof_frame = pd.DataFrame(oof_rows).sort_values(ID_COL).reset_index(drop=True)
+    oof_y_true = oof_frame["actual_code"]
+    oof_y_pred = oof_frame["predicted_code"]
+    oof_probs = oof_frame[[f"prob_{c}" for c in class_names]].to_numpy()
+
     plot_paths = save_evaluation_plots(
-        y_test=y_test,
-        predictions=predictions,
-        probabilities=probabilities,
+        y_test=oof_y_true,
+        predictions=oof_y_pred.to_numpy(),
+        probabilities=oof_probs,
         class_names=class_names,
         importance_frame=importance_frame,
         output_dir=output_dir,
@@ -235,47 +262,41 @@ def train_and_evaluate(
             "xgboost": xgboost.__version__,
         },
         "random_state": random_state,
-        "test_size": test_size,
-        "top_n_features": top_n_features,
-        "n_features_available": len(feature_cols),
-        "n_features_selected": len(selected_features),
+        "n_folds": 5,
+        "cv_scores": cv_scores,
+        "n_features": len(feature_cols),
         "label_map": label_map,
-        "train_class_counts": {
+        "class_counts": {
             code_to_label[int(code)]: int(count)
-            for code, count in y_train.value_counts().sort_index().items()
+            for code, count in y.value_counts().sort_index().items()
         },
-        "test_class_counts": {
-            code_to_label[int(code)]: int(count)
-            for code, count in y_test.value_counts().sort_index().items()
-        },
-        "accuracy": float(accuracy_score(y_test, predictions)),
-        "balanced_accuracy": float(balanced_accuracy_score(y_test, predictions)),
-        "macro_f1": float(f1_score(y_test, predictions, average="macro")),
-        "weighted_f1": float(f1_score(y_test, predictions, average="weighted")),
-        "log_loss": float(log_loss(y_test, probabilities, labels=sorted(code_to_label))),
+        "accuracy": cv_scores["accuracy"]["mean"],
+        "balanced_accuracy": cv_scores["balanced_accuracy"]["mean"],
+        "macro_f1": cv_scores["macro_f1"]["mean"],
+        "weighted_f1": float(f1_score(oof_y_true, oof_y_pred, average="weighted", zero_division=0)),
+        "log_loss": cv_scores["log_loss"]["mean"],
         "classification_report": classification_report(
-            y_test,
-            predictions,
+            oof_y_true,
+            oof_y_pred,
             target_names=class_names,
             output_dict=True,
             zero_division=0,
         ),
-        "confusion_matrix": confusion_matrix(y_test, predictions).tolist(),
+        "confusion_matrix": confusion_matrix(oof_y_true, oof_y_pred).tolist(),
         "plot_paths": plot_paths,
         "leakage_notes": [
-            "Train/test split is stratified and happens before variance feature selection.",
-            "Top-variance feature selection is fit on X_train only.",
+            "Stratified 5-fold CV — no patient appears in both train and val for their own fold.",
             "No imputation or scaling is fit before splitting.",
             "XGBoost handles NaN feature values natively.",
-            "Balanced sample weights are fit on y_train only.",
-            "The input merged table was already globally feature-selected upstream; rebuild from raw modality tables for the strictest final evaluation.",
+            "Balanced sample weights are fit on training fold only, never on val.",
+            "Final model is refit on full dataset for feature importances and the model artifact.",
+            "OOF predictions cover all patients and are used for confusion matrix, ROC curves, and test_predictions.csv.",
         ],
     }
 
     output_dir.mkdir(parents=True, exist_ok=True)
-    model_path = output_dir / "xgboost_cohort_model.json"
+    model_path = output_dir / f"xgboost_{target_col}_model.json"
     metrics_path = output_dir / "classification_metrics.json"
-    features_path = output_dir / "selected_features.json"
     predictions_path = output_dir / "test_predictions.csv"
     split_path = output_dir / "split_assignments.csv"
     importances_path = output_dir / "feature_importances.csv"
@@ -283,46 +304,16 @@ def train_and_evaluate(
     model.save_model(model_path)
     metrics["model_path"] = str(model_path)
     metrics["metrics_path"] = str(metrics_path)
-    metrics["selected_features_path"] = str(features_path)
     metrics["predictions_path"] = str(predictions_path)
     metrics["split_assignments_path"] = str(split_path)
     metrics["feature_importances_path"] = str(importances_path)
 
-    features_path.write_text(json.dumps(selected_features, indent=2) + "\n")
     metrics_path.write_text(json.dumps(metrics, indent=2) + "\n")
 
-    prediction_frame = pd.DataFrame(
-        {
-            ID_COL: test_ids.reset_index(drop=True),
-            "actual_code": y_test.reset_index(drop=True),
-            "actual_cohort": test_labels.reset_index(drop=True),
-            "predicted_code": predictions,
-            "predicted_cohort": [code_to_label[int(code)] for code in predictions],
-        }
-    )
-    for idx, class_name in enumerate(class_names):
-        prediction_frame[f"prob_{class_name}"] = probabilities[:, idx]
-    prediction_frame.to_csv(predictions_path, index=False)
+    pred_cols = [ID_COL, "fold", f"actual_{target_col}", "actual_code", f"predicted_{target_col}", "predicted_code"] + [f"prob_{c}" for c in class_names]
+    oof_frame[pred_cols].to_csv(predictions_path, index=False)
 
-    split_frame = pd.concat(
-        [
-            pd.DataFrame(
-                {
-                    ID_COL: train_ids.reset_index(drop=True),
-                    TARGET_COL: train_labels.reset_index(drop=True),
-                    "split": "train",
-                }
-            ),
-            pd.DataFrame(
-                {
-                    ID_COL: test_ids.reset_index(drop=True),
-                    TARGET_COL: test_labels.reset_index(drop=True),
-                    "split": "test",
-                }
-            ),
-        ],
-        ignore_index=True,
-    )
+    split_frame = oof_frame[[ID_COL, target_col, "fold"]].copy()
     split_frame.to_csv(split_path, index=False)
 
     importance_frame.to_csv(importances_path, index=False)
@@ -347,35 +338,25 @@ def parse_args() -> argparse.Namespace:
         type=pathlib.Path,
         default=pathlib.Path("data/classification_pipeline"),
     )
-    parser.add_argument("--test-size", type=float, default=0.20)
-    parser.add_argument(
-        "--top-n-features",
-        type=int,
-        default=300,
-        help="Select top-N variance features using training data only. Use 0 to keep all features.",
-    )
     parser.add_argument("--random-state", type=int, default=RANDOM_STATE)
     return parser.parse_args()
 
 
 def main() -> None:
     args = parse_args()
-    top_n = None if args.top_n_features <= 0 else args.top_n_features
     metrics = train_and_evaluate(
         data_path=args.data,
         manifest_path=args.manifest,
         output_dir=args.output_dir,
-        test_size=args.test_size,
-        top_n_features=top_n,
         random_state=args.random_state,
     )
 
     print("Classification pipeline complete")
-    print(f"Accuracy: {metrics['accuracy']:.4f}")
-    print(f"Balanced accuracy: {metrics['balanced_accuracy']:.4f}")
-    print(f"Macro F1: {metrics['macro_f1']:.4f}")
-    print(f"Log loss: {metrics['log_loss']:.4f}")
-    print(f"Selected features: {metrics['n_features_selected']} of {metrics['n_features_available']}")
+    print(f"CV accuracy:          {metrics['cv_scores']['accuracy']['mean']:.4f} ± {metrics['cv_scores']['accuracy']['std']:.4f}")
+    print(f"CV balanced accuracy: {metrics['cv_scores']['balanced_accuracy']['mean']:.4f} ± {metrics['cv_scores']['balanced_accuracy']['std']:.4f}")
+    print(f"CV macro F1:          {metrics['cv_scores']['macro_f1']['mean']:.4f} ± {metrics['cv_scores']['macro_f1']['std']:.4f}")
+    print(f"CV log loss:          {metrics['cv_scores']['log_loss']['mean']:.4f} ± {metrics['cv_scores']['log_loss']['std']:.4f}")
+    print(f"Features used: {metrics['n_features']}")
     print(f"Metrics written to {metrics['metrics_path']}")
 
 

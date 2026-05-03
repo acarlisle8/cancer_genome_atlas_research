@@ -11,6 +11,21 @@ _DATA_CATEGORY = "Transcriptome Profiling"
 _DATA_TYPE = "Gene Expression Quantification"
 
 
+def parse_rnaseq_tsv(path: pathlib.Path, patient_id: str) -> "pl.DataFrame":
+    """Parse a single GDC RNA-seq TSV file, filtering N_ summary rows."""
+    import polars as pl
+
+    return (
+        pl.read_csv(path, separator="\t", infer_schema_length=1000)
+        .filter(~pl.col("gene_id").str.starts_with("N_"))
+        .select([
+            pl.lit(patient_id).cast(pl.Utf8).alias("patient_id"),
+            pl.col("gene_id").cast(pl.Utf8),
+            pl.col("fpkm_unstranded").cast(pl.Float64),
+        ])
+    )
+
+
 def ingest_rnaseq(
     output_dir: pathlib.Path,
     project_id: str = "TCGA-BRCA",

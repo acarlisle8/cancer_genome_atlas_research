@@ -11,6 +11,25 @@ _DATA_CATEGORY = "DNA Methylation"
 _DATA_TYPE = "Methylation Beta Value"
 
 
+def parse_methylation_betas(path: pathlib.Path, patient_id: str) -> "pl.DataFrame":
+    """Parse a single GDC methylation beta value file (headerless 2-column TSV)."""
+    import polars as pl
+
+    return (
+        pl.read_csv(
+            path,
+            separator="\t",
+            has_header=False,
+            new_columns=["probe_id", "beta_value"],
+        )
+        .select([
+            pl.lit(patient_id).cast(pl.Utf8).alias("patient_id"),
+            pl.col("probe_id").cast(pl.Utf8),
+            pl.col("beta_value").cast(pl.Float64),
+        ])
+    )
+
+
 def ingest_methylation(
     output_dir: pathlib.Path,
     project_id: str = "TCGA-BRCA",

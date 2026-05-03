@@ -9,6 +9,20 @@ from src.utils import get_logger
 logger = get_logger(__name__)
 
 
+def parse_cnv_seg(path: pathlib.Path, patient_id: str) -> pl.DataFrame:
+    """Parse a single GDC CNV segment file into a tidy DataFrame."""
+    return (
+        pl.read_csv(path, separator="\t", infer_schema_length=1000)
+        .select([
+            pl.lit(patient_id).cast(pl.Utf8).alias("patient_id"),
+            pl.col("Chromosome").cast(pl.Utf8).alias("chromosome"),
+            pl.col("Start").cast(pl.Int64).alias("start"),
+            pl.col("End").cast(pl.Int64).alias("end"),
+            pl.col("Segment_Mean").cast(pl.Float64).alias("copy_number"),
+        ])
+    )
+
+
 def ingest_cnv(
     output_dir: pathlib.Path,
     project_id: str = "TCGA-BRCA",
