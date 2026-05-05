@@ -16,6 +16,8 @@ dependencies = [
     "xgboost>=2.0",
     "matplotlib>=3.8",
     "shap>=0.45",
+    # Phase 4: Spark on EC2 cluster (local-mode for dev, cluster-mode in prod)
+    "pyspark>=3.4.0,<3.5.0",
 ]
 
 [project.optional-dependencies]
