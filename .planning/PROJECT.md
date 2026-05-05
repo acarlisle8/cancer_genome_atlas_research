@@ -14,18 +14,21 @@ A working, reproducible pipeline that produces a clean integrated Parquet datase
 
 ### Validated
 
-(None yet — ship to validate)
+- [x] Ingest TCGA data from public AWS S3 bucket (Phase 1)
+- [x] Aggregate per-patient files into consolidated Parquet files per modality (Phase 1)
+- [x] Join RNA-seq, CNV, and methylation data on shared patient identifiers (Phase 2)
+- [x] Train XGBoost classifier for molecular subtype prediction (Phase 3 — BRCA 0.87, PRAD 0.93, LUAD 0.59 with 5-fold CV)
+- [x] Train XGBoost classifier for cancer type classification across cohorts (Phase 3 — 0.999 ± 0.001 on BRCA/LUAD/PRAD)
+- [x] SHAP analysis to identify gene-level feature importance (Phase 3 — per-class SHAP for cohort + each subtype task)
+- [x] Compare results against published classifiers — internal panel comparison (Phase 3 — PAM50/Wilkerson/iCluster panel hits in top SHAP features)
 
 ### Active
 
-- [ ] Ingest TCGA data from public AWS S3 bucket
-- [ ] Aggregate per-patient files into consolidated Parquet files per modality
-- [ ] Join RNA-seq, CNV, and methylation data on shared patient identifiers
-- [ ] Cover several cancer cohorts (5-10 TCGA cancer types)
-- [ ] Train XGBoost classifier for molecular subtype prediction
-- [ ] Train XGBoost classifier for cancer type classification across cohorts
-- [ ] SHAP analysis to identify gene-level feature importance
-- [ ] Compare results against published classifiers for validation
+- [ ] Cover several cancer cohorts (5-10 TCGA cancer types) — currently 3 of 33; deferred to Phase 5 pending Phase 4 results
+- [ ] External validation against independent cohort (Metabric for BRCA) — Phase 4
+- [ ] Multi-omic integration via MOFA+ (RNA + methylation + CNV + RPPA + mutations + miRNA) — Phase 4
+- [ ] Spark-on-EC2 cluster pipeline for course rubric — Phase 4
+- [ ] Unsupervised subtype recovery via consensus clustering on MOFA+ factors + SNF comparator — Phase 4
 
 ### Out of Scope
 
@@ -54,11 +57,15 @@ A working, reproducible pipeline that produces a clean integrated Parquet datase
 
 | Decision | Rationale | Outcome |
 |----------|-----------|---------|
-| DuckDB + Polars as primary compute | Fast local development, handles medium cohort sizes without EMR cost | — Pending |
-| EMR/Spark as fallback only | Cost-conscious; personal AWS account | — Pending |
-| Parquet as intermediate format | Columnar, efficient for downstream ML feature extraction | — Pending |
-| XGBoost for classification | Standard baseline; results just need to be produced, not novel | — Pending |
-| SHAP for interpretability | Satisfies requirement to identify driving genes; published comparison point | — Pending |
+| DuckDB + Polars as primary compute (Phases 1-3) | Fast local development, handles 3-cohort sizes without cluster cost | Validated — shipped Phases 1-3 |
+| Spark on EC2 cluster (Phase 4+) | Multi-omic at BRCA scale + course rubric requires distributed compute on cluster | Active — Phase 4 |
+| Parquet as intermediate format | Columnar, efficient for downstream ML feature extraction | Validated |
+| XGBoost for supervised classification | Standard baseline; results just need to be produced, not novel | Validated |
+| SHAP for interpretability | Satisfies requirement to identify driving genes; published comparison point | Validated |
+| MOFA+ as primary multi-omic integration method | Multi-likelihood (Gaussian + Bernoulli), handles missing data, ARD sparsity | Active — Phase 4 |
+| SNF as multi-omic comparator | Network-based paradigm distinct from MOFA+'s factor-based — convergence across paradigms strengthens unsupervised story | Active — Phase 4 |
+| Consensus clustering on MOFA+ factor scores (replaces plain k-means) | Stability assessment via resampling; matches published TCGA subtype methodology | Active — Phase 4 |
+| BRCA-deep before cohort-wide | Test multi-omic hypothesis on best-instrumented cohort (Metabric exists) before scaling effort | Active — Phase 4 |
 
 ## Evolution
 
