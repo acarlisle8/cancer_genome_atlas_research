@@ -180,6 +180,94 @@ def preprocess_for_cohort_model(
     return output_path
 
 
+def preprocess_for_subtype_model(
+    features_path: pathlib.Path,
+    labels_path: pathlib.Path,
+    label_col: str,
+    cancer_type: str,
+    output_path: pathlib.Path,
+    manifest_path: pathlib.Path,
+    max_missing_rate: float = 0.20,
+) -> pathlib.Path:
+    """Create a split-ready per-cancer-type subtype classification table.
+
+    Inner-joins features with subtype labels, filters to the target cancer type,
+    remaps rare PRAD classes, drops cohort/cohort_code to prevent leakage, and
+    applies missingness filtering. No train/test split, imputation, or scaling.
+    """
+    if not 0 <= max_missing_rate < 1:
+        raise ValueError("max_missing_rate must be in [0, 1)")
+
+    features_df = pl.read_parquet(features_path)
+    labels_df = pl.read_parquet(labels_path).select([ID_COL, label_col])
+
+    df = features_df.join(labels_df, on=ID_COL, how="inner")
+    df = df.filter(pl.col(label_col).str.starts_with(cancer_type))
+
+    if cancer_type == "PRAD":
+        prad_remap = {
+            "PRAD.3-ETV4": "PRAD.8-other",
+            "PRAD.6-FOXA1": "PRAD.8-other",
+            "PRAD.4-FLI1": "PRAD.8-other",
+            "PRAD.7-IDH1": "PRAD.8-other",
+        }
+        df = df.with_columns(pl.col(label_col).replace(prad_remap))
+    elif cancer_type == "LUAD":
+        luad_remap = {"LUAD.1": "LUAD.other"}
+        df = df.with_columns(pl.col(label_col).replace(luad_remap))
+
+    exclude = {ID_COL, label_col, "cohort", "cohort_code"}
+    feature_cols = [c for c in df.columns if c not in exclude and df.schema[c].is_numeric()]
+
+    sparse_cols = _columns_over_missingness_threshold(df, feature_cols, max_missing_rate)
+    model_feature_cols = [c for c in feature_cols if c not in set(sparse_cols)]
+
+    unique_subtypes = sorted(df[label_col].unique().to_list())
+    label_map = {subtype: idx for idx, subtype in enumerate(unique_subtypes)}
+
+    out_df = (
+        df.select([ID_COL, label_col] + model_feature_cols)
+        .rename({label_col: "subtype"})
+        .with_columns(
+            pl.col("subtype").replace(label_map).cast(pl.Int64).alias("subtype_code")
+        )
+        .select([ID_COL, "subtype", "subtype_code"] + model_feature_cols)
+    )
+
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    manifest_path.parent.mkdir(parents=True, exist_ok=True)
+    out_df.write_parquet(output_path, compression="snappy")
+
+    family_counts = Counter(_feature_family(c) for c in model_feature_cols)
+    manifest: dict[str, Any] = {
+        "cancer_type": cancer_type,
+        "target_column": "subtype",
+        "target_code_column": "subtype_code",
+        "source_label_column": label_col,
+        "n_labeled": len(out_df),
+        "n_classes": len(label_map),
+        "label_map": label_map,
+        "feature_columns": model_feature_cols,
+        "feature_family_counts": dict(sorted(family_counts.items())),
+        "max_missing_rate": max_missing_rate,
+        "leakage_notes": [
+            "cohort and cohort_code were excluded from features to prevent label leakage.",
+            "XGBoost handles NaN feature values natively.",
+        ],
+    }
+    manifest_path.write_text(json.dumps(manifest, indent=2) + "\n")
+
+    logger.info(
+        "Wrote %s rows x %s features to %s (%s subtypes)",
+        len(out_df),
+        len(model_feature_cols),
+        output_path,
+        len(label_map),
+    )
+    logger.info("Dropped %d sparse columns", len(sparse_cols))
+    return output_path
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(

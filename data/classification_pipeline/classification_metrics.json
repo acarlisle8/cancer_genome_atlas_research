@@ -9,98 +9,120 @@
     "xgboost": "3.2.0"
   },
   "random_state": 42,
-  "test_size": 0.2,
-  "top_n_features": 300,
-  "n_features_available": 708,
-  "n_features_selected": 300,
+  "n_folds": 5,
+  "cv_scores": {
+    "accuracy": {
+      "mean": 0.9990498812351543,
+      "std": 0.0011636530844575707
+    },
+    "balanced_accuracy": {
+      "mean": 0.998705501618123,
+      "std": 0.0015854302542285753
+    },
+    "macro_f1": {
+      "mean": 0.9990458729188658,
+      "std": 0.0011685622492748613
+    },
+    "log_loss": {
+      "mean": 0.003628862559920027,
+      "std": 0.0016151968088974566
+    }
+  },
+  "n_features_pool": 7416,
+  "n_features_per_fold_mean": 500.0,
+  "n_features_final_model": 500,
+  "n_marker_features": 0,
+  "marker_panel": null,
+  "top_n_features_arg": 500,
   "label_map": {
     "BRCA": 0,
     "LUAD": 1,
     "PRAD": 2
   },
-  "train_class_counts": {
-    "BRCA": 875,
-    "LUAD": 412,
-    "PRAD": 396
+  "class_counts": {
+    "BRCA": 1094,
+    "LUAD": 515,
+    "PRAD": 495
   },
-  "test_class_counts": {
-    "BRCA": 219,
-    "LUAD": 103,
-    "PRAD": 99
-  },
-  "accuracy": 0.9928741092636579,
-  "balanced_accuracy": 0.9920054380753941,
-  "macro_f1": 0.992844046891494,
-  "weighted_f1": 0.9928648450910245,
-  "log_loss": 0.013840786203049965,
+  "accuracy": 0.9990498812351543,
+  "balanced_accuracy": 0.998705501618123,
+  "macro_f1": 0.9990458729188658,
+  "weighted_f1": 0.999048939028858,
+  "log_loss": 0.003628862559920027,
   "classification_report": {
     "BRCA": {
-      "precision": 0.990909090909091,
-      "recall": 0.9954337899543378,
-      "f1-score": 0.9931662870159453,
-      "support": 219.0
+      "precision": 0.9981751824817519,
+      "recall": 1.0,
+      "f1-score": 0.9990867579908675,
+      "support": 1094.0
     },
     "LUAD": {
-      "precision": 0.9901960784313726,
-      "recall": 0.9805825242718447,
-      "f1-score": 0.9853658536585366,
-      "support": 103.0
+      "precision": 1.0,
+      "recall": 0.996116504854369,
+      "f1-score": 0.9980544747081712,
+      "support": 515.0
     },
     "PRAD": {
       "precision": 1.0,
       "recall": 1.0,
       "f1-score": 1.0,
-      "support": 99.0
+      "support": 495.0
     },
-    "accuracy": 0.9928741092636579,
+    "accuracy": 0.9990494296577946,
     "macro avg": {
-      "precision": 0.9937017231134879,
-      "recall": 0.9920054380753941,
-      "f1-score": 0.992844046891494,
-      "support": 421.0
+      "precision": 0.9993917274939172,
+      "recall": 0.9987055016181229,
+      "f1-score": 0.9990470775663463,
+      "support": 2104.0
     },
     "weighted avg": {
-      "precision": 0.9928724156473213,
-      "recall": 0.9928741092636579,
-      "f1-score": 0.9928648450910245,
-      "support": 421.0
+      "precision": 0.9990511642752076,
+      "recall": 0.9990494296577946,
+      "f1-score": 0.999048939028858,
+      "support": 2104.0
     }
   },
   "confusion_matrix": [
     [
-      218,
-      1,
+      1094,
+      0,
       0
     ],
     [
       2,
-      101,
+      513,
       0
     ],
     [
       0,
       0,
-      99
+      495
     ]
   ],
   "plot_paths": {
     "confusion_matrix": "data/classification_pipeline/plots/confusion_matrix.png",
     "normalized_confusion_matrix": "data/classification_pipeline/plots/confusion_matrix_normalized.png",
     "feature_importance": "data/classification_pipeline/plots/feature_importance_top25.png",
-    "roc_curves": "data/classification_pipeline/plots/roc_curves.png"
+    "roc_curves": "data/classification_pipeline/plots/roc_curves.png",
+    "shap_summary_top20": "data/classification_pipeline/plots/shap_summary_top20.png",
+    "shap_BRCA": "data/classification_pipeline/plots/shap_per_class/shap_BRCA.png",
+    "shap_LUAD": "data/classification_pipeline/plots/shap_per_class/shap_LUAD.png",
+    "shap_PRAD": "data/classification_pipeline/plots/shap_per_class/shap_PRAD.png"
   },
   "leakage_notes": [
-    "Train/test split is stratified and happens before variance feature selection.",
-    "Top-variance feature selection is fit on X_train only.",
+    "Stratified 5-fold CV \u2014 no patient appears in both train and val for their own fold.",
+    "Top-N variance feature selection is computed on the training fold only, eliminating the global-feature-selection leak.",
+    "Marker panel features are force-included in every fold (domain-defined, leakage-free).",
     "No imputation or scaling is fit before splitting.",
     "XGBoost handles NaN feature values natively.",
-    "Balanced sample weights are fit on y_train only.",
-    "The input merged table was already globally feature-selected upstream; rebuild from raw modality tables for the strictest final evaluation."
+    "Balanced sample weights are fit on training fold only, never on val.",
+    "Final model is refit on full dataset for feature importances and the model artifact.",
+    "OOF predictions cover all patients and are used for confusion matrix, ROC curves, and test_predictions.csv."
   ],
   "model_path": "data/classification_pipeline/xgboost_cohort_model.json",
   "metrics_path": "data/classification_pipeline/classification_metrics.json",
-  "selected_features_path": "data/classification_pipeline/selected_features.json",
   "predictions_path": "data/classification_pipeline/test_predictions.csv",
   "split_assignments_path": "data/classification_pipeline/split_assignments.csv",
-  "feature_importances_path": "data/classification_pipeline/feature_importances.csv"
+  "feature_importances_path": "data/classification_pipeline/feature_importances.csv",
+  "shap_summary_csv": "data/classification_pipeline/shap_values_summary.csv"
 }
