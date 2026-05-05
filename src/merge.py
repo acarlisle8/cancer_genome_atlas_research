@@ -4,13 +4,20 @@ import pathlib
 import duckdb
 import polars as pl
 
+from src.markers import ALL_RNA_MARKERS
 from src.utils import get_logger
 
 logger = get_logger(__name__)
 
 COHORTS = ["TCGA-BRCA", "TCGA-LUAD", "TCGA-PRAD"]
-N_RNA_GENES = 500
-N_METH_PROBES = 500
+
+# Variance-based pre-selection caps. Wider than strictly needed to give the
+# training pipeline headroom for in-fold feature selection without re-running
+# the merge. RNA has ~60K genes and methylation has ~850K probes upstream;
+# capping at 5K each yields a merged matrix of ~10K columns — manageable on
+# disk and in memory while preserving most of the informative variance.
+N_RNA_GENES = 5000
+N_METH_PROBES = 5000
 
 HG38_CENTROMERES = {
     "chr1": 123400000, "chr2": 93900000, "chr3": 90900000,
@@ -31,24 +38,31 @@ def _top_n_by_variance(
     parquet_paths: list[pathlib.Path],
     id_col: str,
     value_col: str,
-    n: int = 500,
+    n: int = 5000,
+    must_keep: set[str] | None = None,
 ) -> list[str]:
-    """Return the top-N feature IDs by variance across all cohort Parquets combined.
+    """Return the top-N feature IDs by variance, plus any must_keep features.
 
-    Uses lazy scan to avoid loading all rows into memory simultaneously.
+    Uses lazy scan to avoid loading all rows into memory simultaneously. For
+    versioned Ensembl IDs, must_keep contains bare IDs (e.g., "ENSG00000091831")
+    and is matched against the parquet's versioned column (e.g.,
+    "ENSG00000091831.16") via split on ".".
 
     Args:
         parquet_paths: Paths to Parquet files to scan (all cohorts).
         id_col: Column name for the feature identifier (e.g. "gene_id", "probe_id").
         value_col: Column name for the numeric value (e.g. "fpkm_unstranded", "beta_value").
-        n: Number of top features to return (default 500).
+        n: Number of top features to return (default 5000).
+        must_keep: Optional set of bare feature IDs to force-include regardless of
+            variance rank. Matched against the parquet column via split on ".",
+            so versioned IDs in the parquet still match bare IDs in this set.
 
     Returns:
-        List of n feature ID strings sorted by descending variance.
+        List of feature ID strings: top-N by variance, unioned with must_keep
+        members that actually exist in the parquets. Length is between n and
+        n + |must_keep|.
     """
-    # DuckDB streaming COUNT/VAR aggregation; same pattern that works in
-    # verify_ingest.py. Polars's streaming engine fell back to eager on the
-    # var() + sort + head chain and OOM'd an 8 GB instance — DuckDB doesn't.
+    must_keep = must_keep or set()
     paths_sql = ", ".join(f"'{p}'" for p in parquet_paths)
     con = duckdb.connect(":memory:")
     try:
@@ -62,9 +76,27 @@ def _top_n_by_variance(
             ORDER BY VAR_POP({value_col}) DESC NULLS LAST
             LIMIT {n}
         """).fetchall()
+        selected = {r[0] for r in rows}
+
+        if must_keep:
+            keeps_sql = ", ".join(f"'{k}'" for k in must_keep)
+            keep_rows = con.execute(f"""
+                SELECT DISTINCT {id_col}
+                FROM read_parquet([{paths_sql}])
+                WHERE split_part({id_col}, '.', 1) IN ({keeps_sql})
+            """).fetchall()
+            keep_versioned = {r[0] for r in keep_rows}
+            added = keep_versioned - selected
+            if added:
+                logger.info(
+                    "Force-included %d must_keep features (of %d candidates) "
+                    "not already in top-%d variance",
+                    len(added), len(must_keep), n,
+                )
+            selected |= keep_versioned
     finally:
         con.close()
-    return [r[0] for r in rows]
+    return list(selected)
 
 
 def _pivot_rnaseq(parquet_path: pathlib.Path, top_genes: list[str]) -> pl.DataFrame:
@@ -247,8 +279,14 @@ def merge_all_cohorts(data_dir: pathlib.Path, output_dir: pathlib.Path) -> pathl
     rna_paths = [data_dir / c / "rna_seq.parquet" for c in COHORTS]
     meth_paths = [data_dir / c / "methylation.parquet" for c in COHORTS]
 
-    logger.info("Computing global top-%d genes by variance across %d cohorts", N_RNA_GENES, len(COHORTS))
-    top_genes = _top_n_by_variance(rna_paths, "gene_id", "fpkm_uq_unstranded", N_RNA_GENES)
+    logger.info(
+        "Computing global top-%d genes by variance + %d marker panel genes",
+        N_RNA_GENES, len(ALL_RNA_MARKERS),
+    )
+    top_genes = _top_n_by_variance(
+        rna_paths, "gene_id", "fpkm_uq_unstranded",
+        N_RNA_GENES, must_keep=ALL_RNA_MARKERS,
+    )
 
     logger.info("Computing global top-%d probes by variance across %d cohorts", N_METH_PROBES, len(COHORTS))
     top_probes = _top_n_by_variance(meth_paths, "probe_id", "beta_value", N_METH_PROBES)

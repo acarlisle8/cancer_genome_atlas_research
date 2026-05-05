@@ -8,4 +8,4 @@ CLAUDE.md
 .uv/
 
 data/*
-!data/merged_all_cohorts.parquet
+# Large parquets stay out of git — regenerate via run_merge.py + run_preprocess.py.

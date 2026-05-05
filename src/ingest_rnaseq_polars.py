@@ -71,7 +71,7 @@ def ingest_rnaseq_polars(
             "fpkm_uq_unstranded": pl.String,
         },
         include_file_paths="_source_file",
-        storage_options={"aws_region": "us-east-1"},
+        storage_options={"aws_region": "us-east-1", "skip_signature": "true"},
     )
 
     result = (
