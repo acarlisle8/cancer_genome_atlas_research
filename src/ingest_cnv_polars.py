@@ -60,7 +60,7 @@ def ingest_cnv_polars(
             "Segment_Mean": pl.Float64,
         },
         include_file_paths="_source_file",
-        storage_options={"aws_region": "us-east-1"},
+        storage_options={"aws_region": "us-east-1", "skip_signature": "true"},
     )
 
     result = (
