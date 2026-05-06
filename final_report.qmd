@@ -1,0 +1,385 @@
+---
+title: "Do Supervised and Unsupervised Methods Agree on BRCA Subtypes?"
+subtitle: "DATS 6450, Multi-omic TCGA-BRCA at scale"
+author:
+  - name: "Aidan Carlisle"
+  - name: "Zachary Cardell"
+date: "2026-05-05"
+date-format: long
+abstract: |
+  We ingest six TCGA-BRCA molecular modalities (RNA-seq, methylation, CNV,
+  RPPA, miRNA, mutations) directly from a public S3 bucket, with 444 million
+  rows of methylation alone (exceeding single-node memory), and ask whether
+  **supervised** (XGBoost on PAM50 labels) and **unsupervised** (MOFA+
+  multi-omic factor analysis) approaches recover the same molecular
+  structure on the integrated 6-view dataset. Both succeed and converge.
+  XGBoost reaches 0.87 ± 0.01 5-fold-CV accuracy on PAM50, with 17 of 20
+  panel genes recovered in its top-50 SHAP features. MOFA+, given no
+  labels, produces 14 active factors whose dominant factor loads jointly
+  on all six modalities, and whose downstream k-means cluster is **97% pure
+  Basal-like**. The two methods independently surface the same
+  basal-vs-luminal axis, confirming it as the dominant structural signal
+  in the data.
+format:
+  html:
+    toc: true
+    toc-depth: 3
+    code-fold: true
+    fig-cap-location: bottom
+    embed-resources: true
+  typst:
+    toc: true
+    toc-depth: 2
+    fig-cap-location: bottom
+    section-numbering: 1.1.a
+execute:
+  echo: false
+  warning: false
+bibliography: references.bib
+---
+
+```{python}
+#| label: setup
+#| echo: false
+import json, pathlib
+import pandas as pd
+
+DATA = pathlib.Path("data")
+
+def metrics(run_dir: str) -> dict:
+    with open(DATA / run_dir / "classification_metrics.json") as f:
+        return json.load(f)
+
+def panel(run_dir: str) -> dict:
+    with open(DATA / run_dir / "shap_panel_comparison.json") as f:
+        return json.load(f)
+
+def cv_str(m: dict, key: str) -> str:
+    s = m["cv_scores"][key]
+    return f"{s['mean']:.3f} ± {s['std']:.3f}"
+
+cohort_m = metrics("classification_pipeline")
+brca_m   = metrics("classification_pipeline_brca")
+luad_m   = metrics("classification_pipeline_luad")
+prad_m   = metrics("classification_pipeline_prad")
+brca_panel = panel("classification_pipeline_brca")
+luad_panel = panel("classification_pipeline_luad")
+prad_panel = panel("classification_pipeline_prad")
+
+with open(DATA / "mofa_BRCA" / "cluster_vs_subtype.json") as f:
+    mofa = json.load(f)
+
+ari = mofa.get('agreement_vs_known', {}).get('ari', '?')
+nmi = mofa.get('agreement_vs_known', {}).get('nmi', '?')
+```
+
+# Introduction
+
+## Problem
+
+> *On a multi-omic TCGA-BRCA dataset spanning six modalities and ~744
+> patients, do supervised and unsupervised analyses recover the same
+> molecular-subtype structure?*
+
+Breast cancer (BRCA) is heterogeneous. The **PAM50** transcriptional panel
+[@parker2009pam50] divides it into five intrinsic subtypes (Basal, Her2,
+LumA, LumB, Normal-like) using only RNA-seq. PAM50 is the de facto label,
+but BRCA biology spans modalities PAM50 does not see: methylation, copy
+number, protein abundance, microRNA, somatic mutations. We ask whether a
+multi-omic representation either *(a)* lets a supervised classifier
+sharpen PAM50 prediction, or *(b)* lets an unsupervised model recover
+PAM50-like structure without ever seeing a label, and whether the two
+methods agree on what the dominant axis of variation is.
+
+## Ten project questions
+
+We organize the analysis around 10 specific questions.
+
+**Exploratory (Q1–Q5):** feasibility, data quality, and feature-space
+sanity.
+
+1. How does TCGA modality coverage funnel down to a multi-omic BRCA cohort?
+2. Is methylation missingness technical or biological, and how does it interact with feature selection?
+3. Are the most-recurrent BRCA mutations known cancer drivers (sanity)?
+4. How does per-modality data volume scale, and where does single-node compute fail?
+5. Does the merged six-view feature space preserve modality-specific structure or average it out?
+
+**Supervised ML (Q6–Q7):** XGBoost on PAM50 with SHAP attribution.
+
+6. Can XGBoost predict PAM50 subtypes from multi-omic features, and does it generalize to other cohorts?
+7. Do the model's top SHAP features match the published PAM50 marker panel?
+
+**Unsupervised ML (Q8–Q10):** MOFA+ multi-omic factor analysis.
+
+8. Does MOFA+ identify shared structure across all six modalities?
+9. Does k-means clustering on those factors recover PAM50 subtypes?
+10. Do the supervised and unsupervised methods converge on the same dominant biological axis?
+
+# Dataset and Infrastructure
+
+All data originate from the public TCGA mirror at `s3://tcga-2-open/`. The
+six BRCA modalities used here are summarized in @tbl-modality-volume.
+Methylation is the bottleneck modality: **444 million rows / 5.5 GB
+compressed**, ~30 GB decompressed, exceeding the 7.6 GB single-node memory
+budget if loaded eagerly.
+
+```{python}
+#| label: tbl-modality-volume
+#| tbl-cap: "BRCA modality volumes after ingest. Methylation crosses the 'big-data' threshold."
+modality_data = [
+    ("RNA-seq",     "gene × patient FPKM",       "74.7 M",  "1.6 GB"),
+    ("methylation", "probe × patient β-value",   "444 M",   "5.5 GB"),
+    ("CNV",         "segment × patient log2",    "463 K",   "7 MB"),
+    ("RPPA",        "peptide × patient",         "443 K",   "3.5 MB"),
+    ("miRNA",       "miRNA × patient RPM",       "2.27 M",  "7 MB"),
+    ("mutations",   "gene × patient (0/1)",      "65 K",    "0.4 MB"),
+]
+pd.DataFrame(modality_data, columns=["Modality", "Schema", "Rows", "Compressed"])
+```
+
+Compute is a single AWS EC2 `t3` (2 vCPU, 7.6 GB RAM, no swap). To stay
+within memory, we use **DuckDB streaming** for any aggregation whose
+intermediate hash map is proportional to source rows (variance ranking on
+the methylation parquet) and **Polars lazy** scans
+(`scan_parquet().filter().select().collect(engine="streaming")`) for
+filter-and-project workloads. Eager `pl.read_parquet` on the methylation
+parquet reliably OOM-kills the instance, verified three times in
+development. A multi-node Spark-on-EC2 cluster is scaffolded but not on
+the critical path for the BRCA results below; the streaming patterns
+proved sufficient. Per-stage methods detail is in
+[Appendix A](#sec-methods).
+
+The pipeline has four stages: ingest from S3 (per-modality readers in
+`src/ingest_*_polars.py`), wide-format merge with per-view feature
+pre-selection (`src/merge.py`), supervised classification
+(`code/run_classification_pipeline.py`), and unsupervised factor analysis
+(`code/run_mofa.py` and `code/analyze_mofa.py`).
+
+# Exploratory Data Analysis
+
+## Q1: Multi-omic cohort funnel
+
+The 6-way intersection collapses 800 to 1,100 per-modality patients down
+to **744 multi-omic patients**, the analysis cohort for everything that
+follows.
+
+![BRCA per-modality patient counts. The 6-way intersection (744 patients) defines the multi-omic training cohort.](data/figures/01_brca_modality_coverage.png){#fig-coverage width=75%}
+
+## Q2: Methylation missingness, technical with consequences
+
+Methylation missingness is bimodal. Most probes sit at the array's ~18%
+baseline QC rate, but a long tail is **100% missing for TCGA-BRCA**
+(technical failures). A naive variance ranking selected those tail probes;
+adding a coverage gate (`HAVING COUNT(*) ≥ 80% × n_patients`) dropped
+merged 6-view methylation missingness from **36.3% to 26.7%**, with the
+per-column p90 falling below 30%.
+
+The lesson: any feature-selection statistic computed on the long-format
+parquet must be coverage-gated *first*, not variance-ranked first and
+filtered after. Otherwise a probe with two non-null β-values produces huge
+"empirical variance" and dominates the top-N.
+
+## Q3: Most-recurrent BRCA mutations are textbook drivers
+
+The five most recurrent BRCA mutations are TP53, PIK3CA, TTN, GATA3, and
+CDH1, all classical BRCA drivers, which serves as a sanity check on the
+mutation ingest.
+
+The 2%-recurrence filter in `src/merge.py:_recurrent_mutated_genes`
+selects 193 BRCA genes. The top by recurrence are TP53 (basal/triple-neg),
+PIK3CA (luminal), GATA3 (luminal lineage), CDH1 (invasive lobular), and
+TTN, the textbook large-protein passenger that recurs by length alone.
+
+## Q4: Methylation breaks single-node tools
+
+Methylation at 444 M rows / 5.5 GB compressed (~30 GB decompressed) is the
+only modality that demands streaming; the other five fit comfortably in
+memory.
+
+The need to handle the methylation parquet in DuckDB streams and Polars
+lazy collections is what makes the 6-view merge and downstream analyses
+possible on a single 7.6 GB node.
+
+## Q5: Does the merged feature space preserve modality-specific signal?
+
+Yes. As discussed in Q8 below, MOFA+ identifies two **methylation-only
+factors** (factors 3 and 7) with no loadings on any other view. The merge
+does not average modalities together; it preserves modality-distinct
+signal that downstream factor analysis can disentangle.
+
+# Supervised: XGBoost on PAM50
+
+## Q6: Multi-omic XGBoost predicts PAM50 well
+
+5-fold-CV accuracy is **`{python} cv_str(brca_m, "accuracy")`** with
+macro-F1 **`{python} cv_str(brca_m, "macro_f1")`** on the 5-class PAM50
+problem.
+
+![XGBoost performance on the BRCA PAM50 task and on cross-cohort sanity tasks. BRCA-PAM50 reaches 0.87 5-fold-CV accuracy. The 3-cohort separation task is saturating. LUAD subtypes are harder due to the 6-class × small-cohort combination ([Appendix B](#sec-cross-cohort)).](data/figures/02_classifier_accuracy_comparison.png){#fig-clf-comp}
+
+The pipeline is 5-fold stratified XGBoost with per-fold variance
+re-ranking (top 500 features) plus **force-include** of PAM50 panel genes,
+so the published markers get a fair shot at appearing in SHAP rankings
+even if a fold's variance ranking would have dropped them.
+
+## Q7: Top SHAP features recover the PAM50 panel
+
+**17 of 20 PAM50 panel genes** appear in the model's top-50 features by
+mean |SHAP|, and **9 of 20 in the top-10**. This is strong external
+validation: the model's notion of "what matters for PAM50" matches the
+panel built on independent intrinsic-subtype biology.
+
+![SHAP-vs-panel hits per cohort and rank window (top-10, top-25, top-50). BRCA / PAM50 strongly recovers the panel; LUAD does not, consistent with LUAD's lower subtype accuracy ([Appendix B](#sec-cross-cohort)).](data/figures/03_shap_panel_hits.png){#fig-shap-panel}
+
+Per-class SHAP plots (`data/classification_pipeline_brca/plots/shap_per_class/`)
+show subtype-specific drivers consistent with published intrinsic
+biology: **Basal** driven by FOXA1↓ + FOXC1↑, **Her2** by ERBB2 ranked #1,
+**LumA** by AURKA / CDC20 / ESR1 / BCL2.
+
+# Unsupervised: MOFA+ on Six Modalities
+
+## Q8: MOFA+ identifies a multi-omic dominant factor
+
+MOFA+ converges to **14 active factors** (ARD-pruned from 15), and
+**factor 1 is the only factor with substantial loadings on all six views
+simultaneously**. Its top loadings recover textbook luminal-vs-basal
+biology.
+
+![Variance explained per factor per view (%). Factor 1 is multi-omic across all six views (basal-vs-luminal axis); factor 2 captures a within-luminal proliferation gradient; factors 3 and 7 are methylation-specific.](data/mofa_BRCA/figures/01_variance_explained_heatmap.png){#fig-mofa-variance}
+
+Factor 1 R² across views: 12.2% RNA, 16.8% methylation, 2.1% CNV, 6.9% RPPA,
+7.1% miRNA, 0.81% mutations. Top loadings on factor 1:
+
+- **RPPA**: ESR1 (ERALPHA), GATA3, AR, PR. The canonical luminal hormone-receptor signature.
+- **Mutations**: GATA3 and PIK3CA on the positive side; **TP53 negative**. This is the basal-vs-luminal driver-mutation split documented in TCGA Nature 2012.
+- **miRNA**: miR-375, a well-known ER+ luminal marker miRNA.
+
+![MOFA+ factor 1 vs factor 2, colored by PAM50 subtype. Factor 1 cleanly separates Basal (red) from luminal subtypes; factor 2 captures a within-luminal proliferation gradient.](data/mofa_BRCA/figures/02_factor1_vs_factor2_pam50.png){#fig-f1f2}
+
+## Q9: Clustering on factor scores partially recovers PAM50
+
+k-means at PAM50-cardinality (k=4) yields **ARI =
+`{python} f"{ari:.3f}"`**, **NMI = `{python} f"{nmi:.3f}"`**, below a
+"good agreement" threshold but with strong substructure. **Cluster 0 is
+97% pure Basal-like (n=97)** without using any labels, and cluster 2 is
+76% pure LumA (n=278).
+
+![Cluster × PAM50 contingency at k=4. Cluster 0 is 97% pure Basal-like; cluster 2 is 76% LumA. Mixed clusters reflect genuine LumA / LumB / Her2 overlap on multi-omic axes.](data/mofa_BRCA/figures/03_cluster_pam50_contingency.png){#fig-contingency}
+
+The mid-range ARI is informative rather than a failure. PAM50's LumA /
+LumB / Her2 boundaries are sharper in PAM50's RNA-only definition than in
+the multi-omic factor space, which integrates CNV, methylation, RPPA,
+miRNA, and mutations contributing ~60% of total captured variance.
+Clusters 1 and 3 mixing LumA / LumB / Her2 reflects this.
+
+## Q10: Supervised and unsupervised methods converge on the same axis
+
+Both methods independently surface **basal-vs-luminal** as the dominant
+signal:
+
+- The supervised XGBoost confusion matrix's hardest *non-Basal* errors are LumA/LumB confusions; Basal is the cleanest class.
+- The unsupervised MOFA+ factor 1 cleanly separates Basal from luminal subtypes (@fig-f1f2), and the cleanest cluster (97% Basal-like) is the cluster MOFA+ would have chosen if forced to pick the easiest split first.
+- The supervised top SHAP features (FOXA1, FOXC1, ESR1, ERBB2) and the unsupervised factor-1 loadings (ESR1/GATA3/AR/PR proteins, GATA3/PIK3CA vs TP53 mutations) describe the same hormone-receptor axis seen through two windows.
+
+![Side-by-side: supervised XGBoost on PAM50 labels (5 classes, 0.87 accuracy) vs unsupervised MOFA+ k=4 clustering (no labels, 97%-pure Basal cluster). Both methods succeed in their own framing and converge on the basal-vs-luminal axis.](data/figures/05_supervised_vs_unsupervised_brca.png){#fig-sup-vs-unsup}
+
+With labels, the supervised model treats basal-vs-luminal as one axis
+among five it has to learn. Without labels, the unsupervised model picks
+that same axis as its #1 factor.
+
+# Discussion
+
+## Synthesis
+
+The integrated 6-modality BRCA dataset has a dominant axis that both
+modeling approaches recover: basal-vs-luminal hormone-receptor biology.
+Supervised XGBoost confirms PAM50 is learnable (0.87 accuracy) and that
+its panel-defining genes are also the model's most-attributing features
+(17 of 20 in top-50). Unsupervised MOFA+, given no labels, identifies the
+same axis as its dominant factor and recovers a 97%-pure Basal cluster
+downstream. The two methods answer different questions
+(*"can we predict labels?"* vs *"what structure does the data have?"*) and
+arrive at the same biological story.
+
+## Limitations
+
+- **No external validation cohort.** Metabric BRCA was scoped but not
+  implemented; cross-platform harmonization (microarray to RNA-seq) is the
+  principal obstacle.
+- **Mid-range unsupervised ARI** (0.27–0.31) is below a high-agreement
+  threshold but reflects genuine biology. Multi-omic factors capture
+  cell-of-origin and methylation signal that PAM50 does not see. A fairer
+  comparator would be an iCluster-style integrative subtype label.
+- **Spark cluster scaffolded but not exercised.** All science ran on
+  local DuckDB and Polars; the t3 instance was sufficient given memory
+  discipline.
+
+## Future work
+
+Consensus clustering on MOFA+ factors (bootstrap resampling), Similarity
+Network Fusion [@wang2014snf] as an independent multi-omic comparator,
+external validation on Metabric, and Spark-cluster-driven pan-cancer
+scaling beyond the three cohorts.
+
+# References
+
+::: {#refs}
+:::
+
+# Appendix
+
+## A. Methods detail {#sec-methods}
+
+**Per-view feature pre-selection.** RNA-seq and methylation: top 5,000
+features by variance, gated on **≥ 80% non-null patient coverage** (the
+gate was critical for methylation; see Q2). RPPA, miRNA, CNV: kept all
+features. Mutations: kept genes mutated in **≥ 2% of cohort** (193 BRCA
+genes). Wide pivot then inner-join on `patient_id` produced the 744 ×
+12,612 multi-omic table.
+
+**Supervised classifier.** `XGBoost.XGBClassifier` with 5-fold stratified
+CV. Per fold: re-rank features by variance and keep top 500, plus
+**force-include the PAM50 panel** so panel genes get a fair shot at
+appearing in SHAP rankings even when a fold's variance would drop them.
+SHAP attribution via TreeExplainer; mean |SHAP| across folds defines the
+ranking compared against the panel.
+
+**MOFA+.** Six views with five Gaussian likelihoods plus Bernoulli for
+mutations. Settings: 15 requested factors with ARD pruning,
+`convergence=medium`, `drop_factor_threshold=0.01`. Trained ~16 minutes
+over ~200 iterations on a single CPU; pruned to 14 active factors.
+Downstream k-means swept k=2..10; ARI and NMI computed against PAM50 at
+k=4.
+
+## B. Cross-cohort sanity {#sec-cross-cohort}
+
+To confirm the pipeline isn't BRCA-specific, we ran the same XGBoost +
+SHAP pipeline on TCGA-LUAD (3 modalities, ~230 patients) and TCGA-PRAD
+(3 modalities). Results:
+
+| Task                              | Accuracy                               | Macro F1                                | Panel hits in top-50         |
+|-----------------------------------|----------------------------------------|-----------------------------------------|------------------------------|
+| 3-cohort BRCA/LUAD/PRAD           | `{python} cv_str(cohort_m, "accuracy")` | `{python} cv_str(cohort_m, "macro_f1")` | n/a                          |
+| BRCA / PAM50 (5-class)            | `{python} cv_str(brca_m, "accuracy")`   | `{python} cv_str(brca_m, "macro_f1")`   | 17/20 (PAM50)                |
+| PRAD subtype (4-class)            | `{python} cv_str(prad_m, "accuracy")`   | `{python} cv_str(prad_m, "macro_f1")`   | by-design (label leakage on ERG/ETV1) |
+| LUAD subtype (6-class)            | `{python} cv_str(luad_m, "accuracy")`   | `{python} cv_str(luad_m, "macro_f1")`   | 1/7 (Wilkerson)              |
+
+LUAD's low subtype accuracy reflects the 6-class × ~230-patient
+combination rather than a pipeline bug, and SHAP correspondingly fails to
+recover the Wilkerson panel. The pipeline scales to LUAD/PRAD but those
+results are not the focus of this report.
+
+## C. Reproducibility {#sec-repro}
+
+All code: <https://github.com/acarlisle8/cancer_genome_atlas_research>.
+
+| Stage              | Command                                                | Wall time |
+|--------------------|--------------------------------------------------------|-----------|
+| Ingest             | `uv run python code/run_ingest.py`                          | ~30–60 min |
+| Merge (6-view BRCA)| `uv run python code/run_merge_6view.py`                     | ~8 min    |
+| Supervised + SHAP  | `uv run python code/run_classification_pipeline.py`         | ~10 min   |
+| MOFA+ training     | `uv run python code/run_mofa.py --cohort BRCA`              | ~16 min   |
+| MOFA+ analysis     | `uv run python code/analyze_mofa.py --model-dir data/mofa_BRCA` | <1 min |
+| Render report      | `quarto render final_report.qmd`                       | <30 s     |
+
+Compute: AWS EC2 `t3` (2 vCPU, 7.6 GB, no swap). Python 3.13 + uv.
