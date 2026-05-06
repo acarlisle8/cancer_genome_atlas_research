@@ -19,6 +19,17 @@ COHORTS = ["TCGA-BRCA", "TCGA-LUAD", "TCGA-PRAD"]
 N_RNA_GENES = 5000
 N_METH_PROBES = 5000
 
+# Coverage threshold for variance-based feature pre-selection. A probe/gene
+# must be measured for at least this fraction of cohort patients to be
+# eligible for the top-N-by-variance ranking. Without it, the methylation
+# selection picks up sparsely-measured probes whose empirical variance looks
+# huge across their handful of non-null observations — the merged 6-view
+# matrix's mean meth missingness inflates from the cohort baseline (~18-20%,
+# the array's normal QC failure rate) to 36% because the top-5000 ranking
+# preferentially admits this 100%-missing tail. RNA-seq is ~0% missing so
+# the threshold is effectively a no-op there.
+MIN_COVERAGE_FRAC = 0.80
+
 # Phase 4d: BRCA-only multi-omic merge.
 # Mutations gene filter: keep genes mutated in ≥ MUT_MIN_RECURRENCE_FRAC of the
 # cohort. 2% is the rough biology-grounded "driver vs passenger" threshold —
@@ -65,9 +76,11 @@ def _top_n_by_variance(
             so versioned IDs in the parquet still match bare IDs in this set.
 
     Returns:
-        List of feature ID strings: top-N by variance, unioned with must_keep
-        members that actually exist in the parquets. Length is between n and
-        n + |must_keep|.
+        List of feature ID strings: top-N by variance (filtered to features
+        with ≥MIN_COVERAGE_FRAC patient coverage), unioned with must_keep
+        members that actually exist in the parquets. must_keep entries bypass
+        the coverage filter — marker genes are force-included regardless.
+        Length is between n and n + |must_keep|.
     """
     must_keep = must_keep or set()
     paths_sql = ", ".join(f"'{p}'" for p in parquet_paths)
@@ -75,11 +88,27 @@ def _top_n_by_variance(
     try:
         con.execute("PRAGMA memory_limit='4GB'")
         con.execute("PRAGMA threads=2")
+
+        # Coverage threshold: a feature must have non-null observations for at
+        # least MIN_COVERAGE_FRAC of distinct patients in the source. Without
+        # this, sparsely-measured methylation probes whose empirical variance
+        # is huge across a handful of values dominate the top-N ranking.
+        n_pat = con.execute(
+            f"SELECT COUNT(DISTINCT patient_id) FROM read_parquet([{paths_sql}])"
+        ).fetchone()[0]
+        min_obs = max(1, int(round(n_pat * MIN_COVERAGE_FRAC)))
+        logger.info(
+            "Coverage filter: %d patients in source, requiring ≥%d non-null "
+            "observations (≥%.0f%%) per %s before variance ranking",
+            n_pat, min_obs, MIN_COVERAGE_FRAC * 100, id_col,
+        )
+
         rows = con.execute(f"""
             SELECT {id_col}
             FROM read_parquet([{paths_sql}])
             WHERE {value_col} IS NOT NULL
             GROUP BY {id_col}
+            HAVING COUNT(*) >= {min_obs}
             ORDER BY VAR_POP({value_col}) DESC NULLS LAST
             LIMIT {n}
         """).fetchall()
