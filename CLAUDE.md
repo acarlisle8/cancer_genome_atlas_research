@@ -34,14 +34,13 @@ All phase work happens in Claude Code worktrees on `claude/*` branches — never
 ## Tech Stack
 
 - **Data ingestion:** `boto3` or `s3fs` for S3 access
-- **Processing:** DuckDB + Polars (primary), EMR/Spark (fallback for scale)
+- **Processing:** DuckDB + Polars (Phases 1-3, single-cohort scope), Spark on EC2 cluster (Phase 4+, multi-omic + scale)
 - **Output format:** Parquet
-- **ML:** XGBoost, SHAP
-- **Compute:** Local-first; AWS (personal account) for scale if needed
+- **ML:** XGBoost, SHAP, MOFA+ (multi-omic factor analysis), SNF (similarity network fusion)
+- **Compute:** Local single-node for Phases 1-3; multi-node Spark cluster on EC2 for Phase 4+
 
 ## Key Constraints
 
-- Timeline: ~2-3 weeks
-- Cost-conscious: avoid EMR unless local compute is genuinely insufficient
+- Cost-conscious: prefer standalone Spark cluster on EC2 over managed EMR
 - Pipeline must be reproducible (scriptable, not ad-hoc notebook steps)
-- TCGA data is public: `s3://tcga-2-open/`
+- TCGA data is public: `s3://tcga-2-open/` (raw); personal sync at `s3://g23861422-datsbd-s2026/tcga/`

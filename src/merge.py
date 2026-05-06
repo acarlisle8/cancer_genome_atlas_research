@@ -19,6 +19,24 @@ COHORTS = ["TCGA-BRCA", "TCGA-LUAD", "TCGA-PRAD"]
 N_RNA_GENES = 5000
 N_METH_PROBES = 5000
 
+# Coverage threshold for variance-based feature pre-selection. A probe/gene
+# must be measured for at least this fraction of cohort patients to be
+# eligible for the top-N-by-variance ranking. Without it, the methylation
+# selection picks up sparsely-measured probes whose empirical variance looks
+# huge across their handful of non-null observations — the merged 6-view
+# matrix's mean meth missingness inflates from the cohort baseline (~18-20%,
+# the array's normal QC failure rate) to 36% because the top-5000 ranking
+# preferentially admits this 100%-missing tail. RNA-seq is ~0% missing so
+# the threshold is effectively a no-op there.
+MIN_COVERAGE_FRAC = 0.80
+
+# Phase 4d: BRCA-only multi-omic merge.
+# Mutations gene filter: keep genes mutated in ≥ MUT_MIN_RECURRENCE_FRAC of the
+# cohort. 2% is the rough biology-grounded "driver vs passenger" threshold —
+# below that, rare/private mutations are statistically indistinguishable from
+# noise and add no clustering signal.
+MUT_MIN_RECURRENCE_FRAC = 0.02
+
 HG38_CENTROMERES = {
     "chr1": 123400000, "chr2": 93900000, "chr3": 90900000,
     "chr4": 50400000, "chr5": 48800000, "chr6": 59800000,
@@ -58,9 +76,11 @@ def _top_n_by_variance(
             so versioned IDs in the parquet still match bare IDs in this set.
 
     Returns:
-        List of feature ID strings: top-N by variance, unioned with must_keep
-        members that actually exist in the parquets. Length is between n and
-        n + |must_keep|.
+        List of feature ID strings: top-N by variance (filtered to features
+        with ≥MIN_COVERAGE_FRAC patient coverage), unioned with must_keep
+        members that actually exist in the parquets. must_keep entries bypass
+        the coverage filter — marker genes are force-included regardless.
+        Length is between n and n + |must_keep|.
     """
     must_keep = must_keep or set()
     paths_sql = ", ".join(f"'{p}'" for p in parquet_paths)
@@ -68,11 +88,27 @@ def _top_n_by_variance(
     try:
         con.execute("PRAGMA memory_limit='4GB'")
         con.execute("PRAGMA threads=2")
+
+        # Coverage threshold: a feature must have non-null observations for at
+        # least MIN_COVERAGE_FRAC of distinct patients in the source. Without
+        # this, sparsely-measured methylation probes whose empirical variance
+        # is huge across a handful of values dominate the top-N ranking.
+        n_pat = con.execute(
+            f"SELECT COUNT(DISTINCT patient_id) FROM read_parquet([{paths_sql}])"
+        ).fetchone()[0]
+        min_obs = max(1, int(round(n_pat * MIN_COVERAGE_FRAC)))
+        logger.info(
+            "Coverage filter: %d patients in source, requiring ≥%d non-null "
+            "observations (≥%.0f%%) per %s before variance ranking",
+            n_pat, min_obs, MIN_COVERAGE_FRAC * 100, id_col,
+        )
+
         rows = con.execute(f"""
             SELECT {id_col}
             FROM read_parquet([{paths_sql}])
             WHERE {value_col} IS NOT NULL
             GROUP BY {id_col}
+            HAVING COUNT(*) >= {min_obs}
             ORDER BY VAR_POP({value_col}) DESC NULLS LAST
             LIMIT {n}
         """).fetchall()
@@ -210,6 +246,106 @@ def _pivot_cnv(parquet_path: pathlib.Path) -> pl.DataFrame:
     return wide.select(["patient_id"] + arm_cols)
 
 
+def _pivot_rppa(parquet_path: pathlib.Path) -> pl.DataFrame:
+    """Pivot long-format RPPA Parquet to wide format (patient × peptide).
+
+    Keeps all 487 antibodies — the RPPA panel itself is the curation, no
+    variance ranking applied. Output column names get an "RPPA_" prefix to
+    disambiguate from mutation gene symbols (e.g. RPPA "TP53" vs MUT "TP53").
+
+    Returns:
+        Wide DataFrame: patient_id, RPPA_<peptide_1>, ..., RPPA_<peptide_n>.
+    """
+    # Lazy scan + project — matches _pivot_rnaseq convention. RPPA is small
+    # today (~3 MB) so eager would survive, but staying lazy is the project
+    # rule (the box is 7.6 GB, no swap; eager OOMs are not theoretical here).
+    df = (
+        pl.scan_parquet(parquet_path)
+        .select(["patient_id", "peptide_target", "protein_expression"])
+        .collect()
+    )
+    wide = df.pivot(
+        on="peptide_target",
+        index="patient_id",
+        values="protein_expression",
+        aggregate_function="mean",
+    )
+    rename_map = {c: f"RPPA_{c}" for c in wide.columns if c != "patient_id"}
+    return wide.rename(rename_map)
+
+
+def _pivot_mirna(parquet_path: pathlib.Path) -> pl.DataFrame:
+    """Pivot long-format miRNA Parquet to wide format (patient × miRNA).
+
+    Keeps all 1881 miRNAs — already smaller than the top-5000 cap. Output
+    column names get a "MIR_" prefix.
+
+    Returns:
+        Wide DataFrame: patient_id, MIR_<id_1>, ..., MIR_<id_n>.
+    """
+    df = (
+        pl.scan_parquet(parquet_path)
+        .select(["patient_id", "mirna_id", "reads_per_million_mirna_mapped"])
+        .collect()
+    )
+    wide = df.pivot(
+        on="mirna_id",
+        index="patient_id",
+        values="reads_per_million_mirna_mapped",
+        aggregate_function="mean",
+    )
+    rename_map = {c: f"MIR_{c}" for c in wide.columns if c != "patient_id"}
+    return wide.rename(rename_map)
+
+
+def _recurrent_mutated_genes(parquet_path: pathlib.Path, min_frac: float) -> list[str]:
+    """Return genes mutated in ≥ min_frac of patients in the long-format mutations
+    Parquet. Driver-vs-passenger threshold."""
+    lf = pl.scan_parquet(parquet_path).select(["patient_id", "hugo_symbol"])
+    n_patients = lf.select(pl.col("patient_id").n_unique()).collect().item()
+    cutoff = max(1, int(round(n_patients * min_frac)))
+    counts = (
+        lf.group_by("hugo_symbol")
+        .agg(pl.col("patient_id").n_unique().alias("n_pat"))
+        .filter(pl.col("n_pat") >= cutoff)
+        .collect()
+    )
+    logger.info(
+        "Mutations recurrence filter: %d genes mutated in ≥%d/%d patients (%.0f%%)",
+        counts.height, cutoff, n_patients, min_frac * 100,
+    )
+    return counts["hugo_symbol"].to_list()
+
+
+def _pivot_mutations(parquet_path: pathlib.Path, recurrent_genes: list[str]) -> pl.DataFrame:
+    """Pivot long-format mutations Parquet to a Bernoulli wide matrix.
+
+    Filters to the recurrent gene list, then pivots so each gene is a 0/1
+    column: 1 = patient has at least one non-silent mutation in this gene
+    (already deduped at ingest), 0 = absent. Output column names get a
+    "MUT_" prefix.
+
+    Returns:
+        Wide DataFrame: patient_id, MUT_<gene_1>, ..., MUT_<gene_n>, all 0/1.
+    """
+    df = (
+        pl.scan_parquet(parquet_path)
+        .filter(pl.col("hugo_symbol").is_in(recurrent_genes))
+        .select(["patient_id", "hugo_symbol", "mutated"])
+        .collect()
+    )
+    wide = df.pivot(
+        on="hugo_symbol",
+        index="patient_id",
+        values="mutated",
+        aggregate_function="first",
+    )
+    feat_cols = [c for c in wide.columns if c != "patient_id"]
+    wide = wide.with_columns([pl.col(c).fill_null(0.0) for c in feat_cols])
+    rename_map = {c: f"MUT_{c}" for c in feat_cols}
+    return wide.rename(rename_map)
+
+
 def _pivot_methylation(parquet_path: pathlib.Path, top_probes: list[str]) -> pl.DataFrame:
     """Pivot long-format methylation Parquet to wide format (patient × probe).
 
@@ -331,4 +467,84 @@ def merge_all_cohorts(data_dir: pathlib.Path, output_dir: pathlib.Path) -> pathl
     final.write_parquet(out_path, compression="snappy")
     logger.info("Wrote merged matrix (%d rows x %d cols) to %s", len(final), len(final.columns), out_path)
 
+    return out_path
+
+
+def merge_brca_6view(data_dir: pathlib.Path, output_dir: pathlib.Path) -> pathlib.Path:
+    """Phase 4d: BRCA-only 6-view merge for the multi-omic MOFA+ pipeline.
+
+    Differs from merge_all_cohorts:
+      - BRCA-only (no LUAD/PRAD; the 3 new modalities are BRCA-scope per Phase 4 plan)
+      - 6 views instead of 3: adds RPPA, miRNA, mutations
+      - Variance ranking is BRCA-only (not pan-cohort) — features that distinguish
+        BRCA patients are what matters for BRCA subtyping
+      - Mutations view uses Bernoulli encoding (0/1 per gene), filtered to genes
+        mutated in ≥2% of cohort (driver-vs-passenger threshold)
+      - Continuous views (RNA, methylation) keep the same top-5000-by-variance
+        convention as merge_all_cohorts
+
+    Output column-name prefixes (so run_mofa.py can split views by name pattern):
+        ENSG*  → RNA
+        cg*    → methylation
+        RPPA_* → RPPA
+        MIR_*  → miRNA
+        MUT_*  → mutations
+        else   → CNV (chromosome-arm names: 1p, 1q, ..., Xq)
+
+    Returns:
+        Path to data/TCGA-BRCA/merged_brca_6view.parquet.
+    """
+    output_dir.mkdir(parents=True, exist_ok=True)
+    cohort_dir = data_dir / "TCGA-BRCA"
+
+    logger.info("Phase 4d: BRCA 6-view merge starting")
+
+    # Variance ranking on BRCA only (not pan-cohort)
+    logger.info("Computing BRCA top-%d genes by variance + %d marker panel genes",
+                N_RNA_GENES, len(ALL_RNA_MARKERS))
+    top_genes = _top_n_by_variance(
+        [cohort_dir / "rna_seq.parquet"], "gene_id", "fpkm_uq_unstranded",
+        N_RNA_GENES, must_keep=ALL_RNA_MARKERS,
+    )
+    logger.info("Computing BRCA top-%d probes by variance", N_METH_PROBES)
+    top_probes = _top_n_by_variance(
+        [cohort_dir / "methylation.parquet"], "probe_id", "beta_value", N_METH_PROBES,
+    )
+    logger.info("Computing BRCA mutation gene set (≥%.0f%% recurrence)", MUT_MIN_RECURRENCE_FRAC * 100)
+    recurrent_genes = _recurrent_mutated_genes(cohort_dir / "mutations.parquet", MUT_MIN_RECURRENCE_FRAC)
+
+    # Pivot each view
+    rna_wide  = _pivot_rnaseq(cohort_dir / "rna_seq.parquet", top_genes)
+    logger.info("rna_wide  %s", rna_wide.shape)
+    cnv_wide  = _pivot_cnv(cohort_dir / "cnv.parquet")
+    logger.info("cnv_wide  %s", cnv_wide.shape)
+    meth_wide = _pivot_methylation(cohort_dir / "methylation.parquet", top_probes)
+    logger.info("meth_wide %s", meth_wide.shape)
+    rppa_wide = _pivot_rppa(cohort_dir / "rppa.parquet")
+    logger.info("rppa_wide %s", rppa_wide.shape)
+    mirna_wide = _pivot_mirna(cohort_dir / "mirna.parquet")
+    logger.info("mirna_wide %s", mirna_wide.shape)
+    mut_wide  = _pivot_mutations(cohort_dir / "mutations.parquet", recurrent_genes)
+    logger.info("mut_wide  %s", mut_wide.shape)
+
+    # 6-way inner join on patient_id — patients absent from any one modality dropped
+    merged = (
+        rna_wide
+        .join(cnv_wide,   on="patient_id", how="inner")
+        .join(meth_wide,  on="patient_id", how="inner")
+        .join(rppa_wide,  on="patient_id", how="inner")
+        .join(mirna_wide, on="patient_id", how="inner")
+        .join(mut_wide,   on="patient_id", how="inner")
+    )
+    logger.info("merged 6-view %s (after 6-way inner join)", merged.shape)
+
+    if merged.height == 0:
+        raise RuntimeError("BRCA 6-view merge is empty — check per-modality patient overlaps")
+    if merged["patient_id"].n_unique() != merged.height:
+        raise RuntimeError("Duplicate patient_id rows in merged_brca_6view")
+
+    out_path = output_dir / "merged_brca_6view.parquet"
+    merged.write_parquet(out_path, compression="snappy")
+    logger.info("Wrote merged_brca_6view (%d rows x %d cols) to %s",
+                merged.height, len(merged.columns), out_path)
     return out_path
