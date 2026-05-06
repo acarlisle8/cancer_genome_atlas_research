@@ -212,3 +212,94 @@ The merged matrix is the input to XGBoost. Expected shape:
 
 Phase 3 entry point will be a new `src/classify.py` with an XGBoost
 multiclass classifier on the `cohort` label, plus SHAP summary plots.
+
+---
+
+## Phase 4 — BRCA multi-omic on Spark (sub-phases 4a–4f)
+
+The Phase 4 pipeline produces a 6-view MOFA+ factor model on BRCA and
+clusters patients on the factor scores. **Skips Spark for the actual
+science** — the cluster scaffolding lives in `spark/` for the rubric,
+but 4d–4f run on local DuckDB + Polars + mofapy2.
+
+### Pre-flight
+
+- Phase 1 BRCA parquets must exist (`data/TCGA-BRCA/{rna_seq,cnv,methylation}.parquet`)
+- AWS creds active *only* if you need to re-ingest the 4b modalities
+- mofapy2 in the venv (added 2026-05-06; `uv add mofapy2` if missing)
+
+### TL;DR sequence
+
+```bash
+# 4b — three new BRCA ingest readers (RPPA, miRNA, mutations).
+#      Re-runs are idempotent: existing parquets are skipped.
+uv run python run_ingest.py     # ~10 min for the three new BRCA modalities
+
+# 4d — 6-view BRCA merge. Reads all 6 BRCA modality parquets, applies
+#      coverage + variance filtering, pivots, joins on patient_id,
+#      writes data/TCGA-BRCA/merged_brca_6view.parquet.
+uv run python run_merge_6view.py 2>&1 | tee /tmp/merge_6view.log
+# Watch: "Coverage filter: ... requiring ≥876 non-null observations (≥80%)"
+#        confirms _top_n_by_variance is filtering sparse features.
+# Expected output: "merged 6-view (744, 12612)" then a "Wrote ..." line.
+# Wall time: ~8 min on a 7.6 GB box.
+
+# 4e — MOFA+ training, 6-view, BRCA only.
+# Smoke first (~3 min):
+uv run python run_mofa.py --cohort BRCA --max-iter 50 --convergence fast \
+  2>&1 | tee /tmp/mofa_smoke.log
+# Watch for:
+#   "[load] no 'cohort' column in input — single-cohort file"   (4e item 5)
+#   "[view] methylation (gaussian): kept 5000/5000 features after missingness filter (40%)"
+#   "Likelihoods: ... View 5 (mutations): bernoulli"
+#   "Converged!"
+# Then full run (~16 min):
+uv run python run_mofa.py --cohort BRCA 2>&1 | tee /tmp/mofa_full.log
+# Outputs land in data/mofa_BRCA/ (gitignored):
+#   mofa_model.hdf5, factor_scores.csv, variance_explained.csv,
+#   top_loadings_top25_<view>.csv (6 files), run_manifest.json
+
+# 4f-light — k-means + silhouette + ARI/NMI vs PAM50.
+uv run python analyze_mofa.py --model-dir data/mofa_BRCA \
+  --known-labels data/audit/subtype_label_audit.parquet \
+  --label-col hoadley_subtype_selected \
+  --cancer-type BRCA
+# Outputs: cluster_assignments.csv, cluster_vs_subtype.json,
+#          variance_explained_heatmap.png, kmeans_silhouette.csv
+# 2026-05-06 result: k=2 silhouette best, ARI=0.307, NMI=0.447.
+# At k=4 (--k-min 4 --k-max 4): ARI=0.268, cluster 0 is 97% pure Basal.
+```
+
+### Memory rules (lazy-only)
+
+The methylation parquet is 444M rows / 5.5 GB on a 7.6 GB / no-swap box.
+**Never** use `pl.read_parquet`, `pl.col(...).n_unique()` via Polars, or
+`group_by(...).count()` without explicit streaming on it. See
+[known-issues.md](known-issues.md) "Polars memory landmines".
+
+For ad-hoc EDA, use DuckDB with `PRAGMA memory_limit='4GB'` per the
+pattern in `_top_n_by_variance`.
+
+### Troubleshooting Phase 4
+
+**OOM-killed on a Polars script** — your script went eager somewhere on
+the methylation/RNA-seq parquet. Read the lazy-only rule above.
+
+**Methylation view loses most columns at training time** — check the
+`[view] methylation` log line. If the rate is 0.20 instead of 0.40, the
+per-view dict isn't loading; verify `MAX_MISSING_RATES` in `run_mofa.py`.
+
+**Mutations view R² is exactly 0.0 on every factor** — Bernoulli view
+isn't routed correctly. Check the mofapy2 startup log for
+`View 5 (mutations): bernoulli`. If it shows `gaussian`, the
+`LIKELIHOODS` dict isn't being applied.
+
+**ARD active factors stays at 15 (no pruning)** — likely you're at
+`convergence=fast` with too few iters. The full run at `medium` is
+expected to land at 6–14 active depending on data structure.
+
+**ARI vs PAM50 is below 0.5** — that's the expected outcome at the
+multi-omic-vs-RNA-only comparison ceiling. See
+[known-issues.md](known-issues.md) "PAM50 vs multi-omic comparison
+ceiling" for context. The substructure (cluster 0 ≈ 97% Basal at k=4)
+is the actual scientific result.

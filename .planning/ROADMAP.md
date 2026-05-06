@@ -71,14 +71,14 @@ Plans:
   6. BRCA model and MOFA+ factors generalize to Metabric BRCA cohort (cross-platform harmonization handled)
 
 Sub-phases:
-  4a. Spark cluster scaffolding — port midterm-02 setup-spark-cluster.sh into repo, smoke-test with existing methylation parquet
-  4b. New modality ingest readers — RPPA (Gaussian), mutations (Bernoulli), miRNA (Gaussian), BRCA scope only
-  4c. Spark-native ingest port for methylation/RNA/CNV at BRCA scale
-  4d. Multi-omic merge for BRCA — 6-view sample-aligned matrices
-  4e. MOFA+ multi-omic with modality-appropriate likelihoods (Gaussian × 5 + Bernoulli × 1)
-  4f. Consensus clustering on factor scores + SNF as multi-omic comparator
-  4g. Metabric BRCA external validation (cross-platform harmonization)
-  4h. Phase results writeup + decision: scale to more cohorts (Phase 5) or stop here
+  4a. [x] Spark cluster scaffolding — `spark/setup-spark-cluster.sh` ported from midterm-02. Cluster brought up + torn down without smoke test (rubric demonstration deprioritized; Phase 4 doesn't need the cluster downstream).
+  4b. [x] New modality ingest readers — RPPA / miRNA (Polars `scan_csv` batch) + mutations (DuckDB; MAF format quirks). All BRCA-scope. Outputs at `data/TCGA-BRCA/{rppa,mirna,mutations}.parquet`.
+  4c. [cut] Spark-native ingest port — would re-do existing Phase 1 parquets in PySpark with no scientific value; cut once 4a's "Spark on EC2" demonstration was deprioritized.
+  4d. [x] Multi-omic merge for BRCA — `merge_brca_6view` in `src/merge.py` produces `data/TCGA-BRCA/merged_brca_6view.parquet` (744 patients × 12,612 cols). Re-run on 2026-05-06 after fixing a sparse-feature selection bug in `_top_n_by_variance` (see known-issues.md).
+  4e. [x] MOFA+ multi-omic with modality-appropriate likelihoods (Gaussian × 5 + Bernoulli × 1). `run_mofa.py` extended; full run 2026-05-06 in 16 min, 14 active factors after ARD pruning. Factor 1 is multi-omic across all 6 views (basal-vs-luminal axis); factor 2 is proliferation/driver-mutation. Methylation-specific factors 3 and 7.
+  4f. [partial] k-means + silhouette + ARI/NMI vs PAM50 done via `analyze_mofa.py`. ARI 0.27–0.31 (below the > 0.5 target — see known-issues.md "PAM50 vs multi-omic comparison ceiling"). Cluster 0 at k=4 is 97% basal-like. **Not yet done**: consensus clustering with bootstrap resampling; SNF comparator.
+  4g. [ ] Metabric BRCA external validation — cross-platform harmonization (microarray ↔ RNA-seq). Likely RNA + meth + CNV only; RPPA/miRNA Metabric availability TBD.
+  4h. [ ] Phase results writeup + decision: scale to more cohorts (Phase 5) or stop here.
 
 **Out of scope for Phase 4**:
   - Cohort scaling beyond BRCA (deferred to Phase 5 if Phase 4 shows multi-omic value)
@@ -93,4 +93,4 @@ Sub-phases:
 | 1. Ingest | 5/5 | Complete | 2026-04-27 |
 | 2. Merge | 2/2 | Complete | 2026-04-28 |
 | 3. Classify + Deploy | shipped via PRs #4-#6 | Complete | 2026-05-05 |
-| 4. BRCA multi-omic on Spark | 0/8 | Planning | - |
+| 4. BRCA multi-omic on Spark | 5/8 (4a/4b/4d/4e done; 4f partial; 4c cut) | In progress | - |
