@@ -20,9 +20,9 @@ source .venv/bin/activate
 # AWS credentials must be configured — see "S3 access" below
 aws configure   # or attach EC2 instance profile
 
-# Run pipeline
-python run_ingest.py    # ~30-60 min, writes ~17 GB to data/
-python run_merge.py     # ~5 min, writes data/merged_all_cohorts.parquet (~11 MB)
+# Run pipeline (entry-point scripts live under code/)
+python code/run_ingest.py    # ~30-60 min, writes ~17 GB to data/
+python code/run_merge.py     # ~5 min, writes data/merged_all_cohorts.parquet (~11 MB)
 
 # Verify (paste from .planning/phases/02-merge/02-VERIFY-CHECKLIST.md)
 ```
@@ -74,7 +74,7 @@ three options:
    ```bash
    # Edit sync_to_s3.py: change DEST_BUCKET to your bucket
    # Edit src/gdc_client.py: change TCGA_S3_BUCKET to match
-   python sync_to_s3.py --project TCGA-BRCA TCGA-LUAD TCGA-PRAD
+   python code/sync_to_s3.py --project TCGA-BRCA TCGA-LUAD TCGA-PRAD
    ```
    This pulls from `s3://tcga-2-open/` (public) and writes to your bucket.
    Storage cost is on you (~25 GB for 3 cohorts).
@@ -100,7 +100,7 @@ instance.
 
 ### Step 1: Ingest (Phase 1)
 ```bash
-python run_ingest.py
+python code/run_ingest.py
 ```
 
 What it does: orchestrates 3 cohorts × 3 modalities = 9 ingestion jobs. Each
@@ -115,7 +115,7 @@ Outputs: 9 files at `data/{cohort}/{modality}.parquet`.
 
 ### Step 2: Merge (Phase 2)
 ```bash
-python run_merge.py
+python code/run_merge.py
 ```
 
 What it does:
@@ -233,12 +233,12 @@ but 4d–4f run on local DuckDB + Polars + mofapy2.
 ```bash
 # 4b — three new BRCA ingest readers (RPPA, miRNA, mutations).
 #      Re-runs are idempotent: existing parquets are skipped.
-uv run python run_ingest.py     # ~10 min for the three new BRCA modalities
+uv run python code/run_ingest.py     # ~10 min for the three new BRCA modalities
 
 # 4d — 6-view BRCA merge. Reads all 6 BRCA modality parquets, applies
 #      coverage + variance filtering, pivots, joins on patient_id,
 #      writes data/TCGA-BRCA/merged_brca_6view.parquet.
-uv run python run_merge_6view.py 2>&1 | tee /tmp/merge_6view.log
+uv run python code/run_merge_6view.py 2>&1 | tee /tmp/merge_6view.log
 # Watch: "Coverage filter: ... requiring ≥876 non-null observations (≥80%)"
 #        confirms _top_n_by_variance is filtering sparse features.
 # Expected output: "merged 6-view (744, 12612)" then a "Wrote ..." line.
@@ -246,7 +246,7 @@ uv run python run_merge_6view.py 2>&1 | tee /tmp/merge_6view.log
 
 # 4e — MOFA+ training, 6-view, BRCA only.
 # Smoke first (~3 min):
-uv run python run_mofa.py --cohort BRCA --max-iter 50 --convergence fast \
+uv run python code/run_mofa.py --cohort BRCA --max-iter 50 --convergence fast \
   2>&1 | tee /tmp/mofa_smoke.log
 # Watch for:
 #   "[load] no 'cohort' column in input — single-cohort file"   (4e item 5)
@@ -254,13 +254,13 @@ uv run python run_mofa.py --cohort BRCA --max-iter 50 --convergence fast \
 #   "Likelihoods: ... View 5 (mutations): bernoulli"
 #   "Converged!"
 # Then full run (~16 min):
-uv run python run_mofa.py --cohort BRCA 2>&1 | tee /tmp/mofa_full.log
+uv run python code/run_mofa.py --cohort BRCA 2>&1 | tee /tmp/mofa_full.log
 # Outputs land in data/mofa_BRCA/ (gitignored):
 #   mofa_model.hdf5, factor_scores.csv, variance_explained.csv,
 #   top_loadings_top25_<view>.csv (6 files), run_manifest.json
 
 # 4f-light — k-means + silhouette + ARI/NMI vs PAM50.
-uv run python analyze_mofa.py --model-dir data/mofa_BRCA \
+uv run python code/analyze_mofa.py --model-dir data/mofa_BRCA \
   --known-labels data/audit/subtype_label_audit.parquet \
   --label-col hoadley_subtype_selected \
   --cancer-type BRCA
@@ -287,7 +287,7 @@ the methylation/RNA-seq parquet. Read the lazy-only rule above.
 
 **Methylation view loses most columns at training time** — check the
 `[view] methylation` log line. If the rate is 0.20 instead of 0.40, the
-per-view dict isn't loading; verify `MAX_MISSING_RATES` in `run_mofa.py`.
+per-view dict isn't loading; verify `MAX_MISSING_RATES` in `code/run_mofa.py`.
 
 **Mutations view R² is exactly 0.0 on every factor** — Bernoulli view
 isn't routed correctly. Check the mofapy2 startup log for
