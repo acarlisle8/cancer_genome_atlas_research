@@ -227,7 +227,14 @@ def _pivot_rppa(parquet_path: pathlib.Path) -> pl.DataFrame:
     Returns:
         Wide DataFrame: patient_id, RPPA_<peptide_1>, ..., RPPA_<peptide_n>.
     """
-    df = pl.read_parquet(parquet_path)
+    # Lazy scan + project — matches _pivot_rnaseq convention. RPPA is small
+    # today (~3 MB) so eager would survive, but staying lazy is the project
+    # rule (the box is 7.6 GB, no swap; eager OOMs are not theoretical here).
+    df = (
+        pl.scan_parquet(parquet_path)
+        .select(["patient_id", "peptide_target", "protein_expression"])
+        .collect()
+    )
     wide = df.pivot(
         on="peptide_target",
         index="patient_id",
@@ -247,7 +254,11 @@ def _pivot_mirna(parquet_path: pathlib.Path) -> pl.DataFrame:
     Returns:
         Wide DataFrame: patient_id, MIR_<id_1>, ..., MIR_<id_n>.
     """
-    df = pl.read_parquet(parquet_path)
+    df = (
+        pl.scan_parquet(parquet_path)
+        .select(["patient_id", "mirna_id", "reads_per_million_mirna_mapped"])
+        .collect()
+    )
     wide = df.pivot(
         on="mirna_id",
         index="patient_id",
@@ -261,13 +272,14 @@ def _pivot_mirna(parquet_path: pathlib.Path) -> pl.DataFrame:
 def _recurrent_mutated_genes(parquet_path: pathlib.Path, min_frac: float) -> list[str]:
     """Return genes mutated in ≥ min_frac of patients in the long-format mutations
     Parquet. Driver-vs-passenger threshold."""
-    df = pl.read_parquet(parquet_path)
-    n_patients = df["patient_id"].n_unique()
+    lf = pl.scan_parquet(parquet_path).select(["patient_id", "hugo_symbol"])
+    n_patients = lf.select(pl.col("patient_id").n_unique()).collect().item()
     cutoff = max(1, int(round(n_patients * min_frac)))
     counts = (
-        df.group_by("hugo_symbol")
+        lf.group_by("hugo_symbol")
         .agg(pl.col("patient_id").n_unique().alias("n_pat"))
         .filter(pl.col("n_pat") >= cutoff)
+        .collect()
     )
     logger.info(
         "Mutations recurrence filter: %d genes mutated in ≥%d/%d patients (%.0f%%)",
@@ -287,7 +299,12 @@ def _pivot_mutations(parquet_path: pathlib.Path, recurrent_genes: list[str]) -> 
     Returns:
         Wide DataFrame: patient_id, MUT_<gene_1>, ..., MUT_<gene_n>, all 0/1.
     """
-    df = pl.read_parquet(parquet_path).filter(pl.col("hugo_symbol").is_in(recurrent_genes))
+    df = (
+        pl.scan_parquet(parquet_path)
+        .filter(pl.col("hugo_symbol").is_in(recurrent_genes))
+        .select(["patient_id", "hugo_symbol", "mutated"])
+        .collect()
+    )
     wide = df.pivot(
         on="hugo_symbol",
         index="patient_id",

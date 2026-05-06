@@ -167,7 +167,16 @@ def main() -> None:
     out_dir.mkdir(parents=True, exist_ok=True)
 
     print(f"[load] {args.input}", flush=True)
-    df = pl.read_parquet(args.input).filter(pl.col(COHORT_COL) == args.cohort).to_pandas()
+    # Lazy scan + filter pushdown: defensive against --input being pointed at a
+    # long-format modality parquet (methylation = 444M rows, OOM-kills a 7.6 GB
+    # box if read eagerly). For the wide merged_* parquet this is essentially
+    # free — the filter prunes nothing — but the convention matters.
+    df = (
+        pl.scan_parquet(args.input)
+        .filter(pl.col(COHORT_COL) == args.cohort)
+        .collect(engine="streaming")
+        .to_pandas()
+    )
     print(f"[load] cohort={args.cohort} rows={len(df)}", flush=True)
 
     views = split_views(df)
