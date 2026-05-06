@@ -18,6 +18,7 @@ dependencies = [
     "shap>=0.45",
     # Phase 4: Spark on EC2 cluster (local-mode for dev, cluster-mode in prod)
     "pyspark>=3.4.0,<3.5.0",
+    "mofapy2>=0.7.4",
 ]
 
 [project.optional-dependencies]
